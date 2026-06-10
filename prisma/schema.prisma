@@ -1,0 +1,331 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ImportadexOperationType {
+  IMPORT
+  EXPORT
+  TRANSIT
+  CUSTOMS_CLEARANCE
+  LOCAL_TRANSPORT
+}
+
+enum ImportadexTransportMode {
+  SEA
+  AIR
+  LAND
+  MULTIMODAL
+}
+
+enum ImportadexCargoType {
+  CONTAINERIZED
+  LOOSE
+  PALLETIZED
+  NON_PALLETIZED
+  LCL
+  BREAKBULK
+}
+
+enum ImportadexOperationStatus {
+  DRAFT
+  OPEN
+  IN_TRANSIT_SEA
+  IN_TRANSIT_AIR
+  IN_TRANSIT_LAND
+  IN_CUSTOMS
+  PENDING_DOCUMENTS
+  READY_FOR_DELIVERY
+  DELIVERED
+  CLOSED
+  CANCELLED
+}
+
+enum ImportadexIncidentStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  RESOLVED
+  CANCELLED
+}
+
+enum ImportadexSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model ImportadexOperation {
+  id             String                    @id @default(cuid())
+  code           String                    @unique @map("code")
+  clientName     String                    @map("client_name")
+  operationType  ImportadexOperationType   @map("operation_type")
+  transportMode  ImportadexTransportMode   @map("transport_mode")
+  cargoType      ImportadexCargoType       @map("cargo_type")
+  status         ImportadexOperationStatus @default(OPEN)
+  customsStatus  String?                   @map("customs_status")
+  priority       String                    @default("NORMAL")
+  origin         String
+  destination    String
+  port           String?
+  carrier        String?
+  reference      String?
+  eta            DateTime?
+  progress       Int                       @default(0)
+  isActive       Boolean                   @default(true) @map("is_active")
+  deletedAt      DateTime?                 @map("deleted_at")
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  updatedAt      DateTime                  @updatedAt @map("updated_at")
+  shipments      ImportadexShipment[]
+  containers     ImportadexContainer[]
+  cargoItems     ImportadexCargoItem[]
+  customsFiles   ImportadexCustomsFile[]
+  documents      ImportadexDocument[]
+  events         ImportadexEvent[]
+  incidents      ImportadexIncident[]
+  comments       ImportadexComment[]
+  attachments    ImportadexAttachment[]
+  auditLogs      ImportadexAuditLog[]
+
+  @@map("importadex_operations")
+}
+
+model ImportadexShipment {
+  id          String              @id @default(cuid())
+  operationId String              @map("operation_id")
+  operation   ImportadexOperation @relation(fields: [operationId], references: [id])
+  mode        String
+  origin      String
+  destination String
+  etd         DateTime?
+  eta         DateTime?
+  status      String              @default("OPEN")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@map("importadex_shipments")
+}
+
+model ImportadexContainer {
+  id          String              @id @default(cuid())
+  operationId String              @map("operation_id")
+  operation   ImportadexOperation @relation(fields: [operationId], references: [id])
+  number      String
+  type        String
+  seal        String?
+  carrier     String?
+  freeDays    Int                 @default(0) @map("free_days")
+  returnLimit DateTime?           @map("return_limit")
+  status      String              @default("REGISTERED")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@map("importadex_containers")
+}
+
+model ImportadexCargoItem {
+  id          String              @id @default(cuid())
+  operationId String              @map("operation_id")
+  operation   ImportadexOperation @relation(fields: [operationId], references: [id])
+  packageType String              @map("package_type")
+  pieces      Int                 @default(0)
+  pallets     Int                 @default(0)
+  weightKg    Decimal?            @map("weight_kg") @db.Decimal(12, 2)
+  volumeCbm   Decimal?            @map("volume_cbm") @db.Decimal(12, 2)
+  handling    String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@map("importadex_cargo_items")
+}
+
+model ImportadexCustomsFile {
+  id             String              @id @default(cuid())
+  operationId    String              @map("operation_id")
+  operation      ImportadexOperation @relation(fields: [operationId], references: [id])
+  declarationNo  String?             @map("declaration_no")
+  regime         String?
+  channel        String?
+  status         String              @default("PENDING")
+  responsible    String?
+  submittedAt    DateTime?           @map("submitted_at")
+  releasedAt     DateTime?           @map("released_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+
+  @@map("importadex_customs_files")
+}
+
+model ImportadexDocument {
+  id          String              @id @default(cuid())
+  operationId String              @map("operation_id")
+  operation   ImportadexOperation @relation(fields: [operationId], references: [id])
+  name        String
+  type        String
+  status      String              @default("PENDING")
+  owner       String?
+  url         String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@map("importadex_documents")
+}
+
+model ImportadexIncident {
+  id          String                   @id @default(cuid())
+  operationId String                   @map("operation_id")
+  operation   ImportadexOperation      @relation(fields: [operationId], references: [id])
+  type        String
+  severity    ImportadexSeverity       @default(MEDIUM)
+  status      ImportadexIncidentStatus @default(OPEN)
+  owner       String?
+  description String?
+  dueAt       DateTime?                @map("due_at")
+  resolvedAt  DateTime?                @map("resolved_at")
+  createdAt   DateTime                 @default(now()) @map("created_at")
+  updatedAt   DateTime                 @updatedAt @map("updated_at")
+
+  @@map("importadex_incidents")
+}
+
+model ImportadexEvent {
+  id          String              @id @default(cuid())
+  operationId String              @map("operation_id")
+  operation   ImportadexOperation @relation(fields: [operationId], references: [id])
+  event       String
+  owner       String?
+  location    String?
+  eventDate   DateTime            @default(now()) @map("event_date")
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  @@map("importadex_events")
+}
+
+model ImportadexComment {
+  id          String              @id @default(cuid())
+  operationId String              @map("operation_id")
+  operation   ImportadexOperation @relation(fields: [operationId], references: [id])
+  body        String
+  author      String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  @@map("importadex_comments")
+}
+
+model ImportadexAttachment {
+  id          String              @id @default(cuid())
+  operationId String              @map("operation_id")
+  operation   ImportadexOperation @relation(fields: [operationId], references: [id])
+  fileName    String              @map("file_name")
+  fileUrl     String              @map("file_url")
+  fileType    String?             @map("file_type")
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  @@map("importadex_attachments")
+}
+
+model ImportadexAuditLog {
+  id          String               @id @default(cuid())
+  operationId String?              @map("operation_id")
+  operation   ImportadexOperation? @relation(fields: [operationId], references: [id])
+  action      String
+  entity      String
+  entityId    String?              @map("entity_id")
+  actor       String?
+  changes     Json?
+  createdAt   DateTime             @default(now()) @map("created_at")
+
+  @@map("importadex_audit_logs")
+}
+
+model ImportadexClient {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("importadex_clients")
+}
+
+model ImportadexProvider {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("importadex_providers")
+}
+
+model ImportadexCarrier {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  mode      String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("importadex_carriers")
+}
+
+model ImportadexPort {
+  id        String   @id @default(cuid())
+  name      String
+  country   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("importadex_ports")
+}
+
+model ImportadexAirport {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  country   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("importadex_airports")
+}
+
+model ImportadexWarehouse {
+  id        String   @id @default(cuid())
+  name      String
+  location  String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("importadex_warehouses")
+}
+
+model ImportadexTerminal {
+  id        String   @id @default(cuid())
+  name      String
+  location  String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("importadex_terminals")
+}
+
+model ImportadexCatalog {
+  id        String   @id @default(cuid())
+  group     String
+  value     String
+  label     String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([group, value])
+  @@map("importadex_catalogs")
+}
+

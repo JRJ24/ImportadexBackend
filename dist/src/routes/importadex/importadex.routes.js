@@ -1,0 +1,26 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const importadex_controller_1 = require("../../controllers/importadex/importadex.controller");
+const router = (0, express_1.Router)();
+router.get("/operations", importadex_controller_1.importadexController.listOperations);
+router.post("/operations", importadex_controller_1.importadexController.createOperation);
+router.get("/operations/:id", importadex_controller_1.importadexController.getOperation);
+router.patch("/operations/:id", importadex_controller_1.importadexController.updateOperation);
+router.patch("/operations/:id/status", importadex_controller_1.importadexController.updateStatus);
+router.get("/operations/:id/events", importadex_controller_1.importadexController.listEvents);
+router.post("/operations/:id/events", importadex_controller_1.importadexController.createEvent);
+router.get("/operations/:id/comments", importadex_controller_1.importadexController.listComments);
+router.post("/operations/:id/comments", importadex_controller_1.importadexController.createComment);
+for (const key of ["containers", "customs-files", "incidents", "documents", "attachments"]) {
+    const handlers = importadex_controller_1.importadexController.tableHandlers(key);
+    router.get(`/${key}`, handlers.list);
+    router.post(`/${key}`, handlers.create);
+    router.patch(`/${key}/:id`, handlers.update);
+}
+router.get("/shipments", (_req, res) => res.json({ ok: true, data: [] }));
+router.get("/cargo-items", (_req, res) => res.json({ ok: true, data: [] }));
+router.get("/catalogs", importadex_controller_1.importadexController.catalogs);
+router.get("/dashboard", importadex_controller_1.importadexController.dashboard);
+router.get("/reports", importadex_controller_1.importadexController.reports);
+exports.default = router;
