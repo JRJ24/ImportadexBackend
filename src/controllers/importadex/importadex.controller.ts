@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import type { ZodType } from "zod";
 import { importadexService, type TableKey } from "../../services/importadex/importadex.service";
+import type { UploadedFile } from "../../middlewares/processFiles";
 import {
   attachmentSchema,
   commentSchema,
@@ -20,6 +21,32 @@ const ok = (res: Response, data: unknown, status = 200) => res.status(status).js
 const parse = (schema: ZodType, data: unknown) => schema.parse(data) as Record<string, unknown>;
 
 const param = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value ?? "");
+
+const getUploadedFiles = (req: Request) => {
+  const body = req.body as {
+    imageUrls?: string[] | string;
+    uploadedFiles?: UploadedFile[];
+  };
+
+  if (Array.isArray(body.uploadedFiles)) {
+    return body.uploadedFiles;
+  }
+
+  const imageUrls = Array.isArray(body.imageUrls)
+    ? body.imageUrls
+    : body.imageUrls
+      ? [body.imageUrls]
+      : [];
+
+  return imageUrls.map((url, index) => ({
+    key: url,
+    fileName: `attachment-${index + 1}`,
+    originalName: `attachment-${index + 1}`,
+    mimeType: "application/octet-stream",
+    size: 0,
+    url,
+  }));
+};
 
 export const importadexController = {
   async listOperations(req: Request, res: Response, next: NextFunction) {
@@ -107,6 +134,41 @@ export const importadexController = {
   async createComment(req: Request, res: Response, next: NextFunction) {
     try {
       ok(res, await importadexService.createComment(param(req.params.id), parse(commentSchema, req.body)), 201);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async listOperationAttachments(req: Request, res: Response, next: NextFunction) {
+    try {
+      ok(res, await importadexService.listAttachments(param(req.params.id)));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async uploadOperationAttachments(req: Request, res: Response, next: NextFunction) {
+    try {
+      const operationId = param(req.params.id) || String((req.body as { operationId?: string }).operationId ?? "");
+      const files = getUploadedFiles(req);
+
+      if (!operationId) {
+        res.status(400).json({ ok: false, message: "operationId is required" });
+        return;
+      }
+
+      if (!files.length) {
+        res.status(400).json({ ok: false, message: "At least one file is required" });
+        return;
+      }
+
+      const data = await importadexService.createAttachments(operationId, files);
+      if (!data) {
+        res.status(404).json({ ok: false, message: "Operation not found" });
+        return;
+      }
+
+      ok(res, data, 201);
     } catch (error) {
       next(error);
     }

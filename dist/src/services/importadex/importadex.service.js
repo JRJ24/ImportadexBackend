@@ -121,7 +121,8 @@ exports.importadexService = {
         COALESCE((SELECT json_agg(cf.*) FROM importadex_customs_files cf WHERE cf.operation_id = o.id), '[]') AS customs_files,
         COALESCE((SELECT json_agg(i.*) FROM importadex_incidents i WHERE i.operation_id = o.id), '[]') AS incidents,
         COALESCE((SELECT json_agg(e.* ORDER BY e.event_date) FROM importadex_events e WHERE e.operation_id = o.id), '[]') AS events,
-        COALESCE((SELECT json_agg(cm.* ORDER BY cm.created_at) FROM importadex_comments cm WHERE cm.operation_id = o.id), '[]') AS comments
+        COALESCE((SELECT json_agg(cm.* ORDER BY cm.created_at) FROM importadex_comments cm WHERE cm.operation_id = o.id), '[]') AS comments,
+        COALESCE((SELECT json_agg(a.* ORDER BY a.created_at DESC) FROM importadex_attachments a WHERE a.operation_id = o.id), '[]') AS attachments
        FROM importadex_operations o
        WHERE o.id = $1 AND o.is_active = true`, id);
         return rows[0] ?? null;
@@ -162,6 +163,31 @@ exports.importadexService = {
         const item = await insert(tableMap[key], payload);
         await audit("CREATE", key, item.id, payload.operationId, item);
         return item;
+    },
+    async listAttachments(operationId) {
+        return connectionDB_1.prisma.$queryRawUnsafe(`SELECT *
+       FROM importadex_attachments
+       WHERE operation_id = $1
+       ORDER BY created_at DESC`, operationId);
+    },
+    async createAttachments(operationId, files) {
+        const operation = await findById("importadex_operations", operationId);
+        if (!operation)
+            return null;
+        const attachments = await Promise.all(files.map((file) => insert("importadex_attachments", {
+            operationId,
+            fileName: file.originalName || file.fileName,
+            fileUrl: file.url,
+            fileType: file.mimeType,
+        })));
+        await insert("importadex_events", {
+            operationId,
+            event: "Evidencia cargada",
+            owner: "system",
+            location: files.map((file) => file.originalName || file.fileName).join(", "),
+        });
+        await audit("CREATE", "attachments", null, operationId, attachments);
+        return this.getOperation(operationId);
     },
     async updateTable(key, id, payload) {
         const item = await patch(tableMap[key], id, payload);

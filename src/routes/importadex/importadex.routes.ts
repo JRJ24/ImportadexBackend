@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { importadexController } from "../../controllers/importadex/importadex.controller";
+import { processFile } from "../../middlewares/processFiles";
 
 const router = Router();
 
@@ -12,6 +13,9 @@ router.get("/operations/:id/events", importadexController.listEvents);
 router.post("/operations/:id/events", importadexController.createEvent);
 router.get("/operations/:id/comments", importadexController.listComments);
 router.post("/operations/:id/comments", importadexController.createComment);
+router.get("/operations/:id/attachments", importadexController.listOperationAttachments);
+router.post("/operations/:id/attachments", processFile, importadexController.uploadOperationAttachments);
+router.post("/attachments/upload", processFile, importadexController.uploadOperationAttachments);
 
 for (const key of ["containers", "customs-files", "incidents", "documents", "attachments"] as const) {
   const handlers = importadexController.tableHandlers(key);

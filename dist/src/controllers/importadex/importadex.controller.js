@@ -6,6 +6,25 @@ const importadex_schemas_1 = require("../../validators/importadex.schemas");
 const ok = (res, data, status = 200) => res.status(status).json({ ok: true, data });
 const parse = (schema, data) => schema.parse(data);
 const param = (value) => (Array.isArray(value) ? value[0] : value ?? "");
+const getUploadedFiles = (req) => {
+    const body = req.body;
+    if (Array.isArray(body.uploadedFiles)) {
+        return body.uploadedFiles;
+    }
+    const imageUrls = Array.isArray(body.imageUrls)
+        ? body.imageUrls
+        : body.imageUrls
+            ? [body.imageUrls]
+            : [];
+    return imageUrls.map((url, index) => ({
+        key: url,
+        fileName: `attachment-${index + 1}`,
+        originalName: `attachment-${index + 1}`,
+        mimeType: "application/octet-stream",
+        size: 0,
+        url,
+    }));
+};
 exports.importadexController = {
     async listOperations(req, res, next) {
         try {
@@ -92,6 +111,37 @@ exports.importadexController = {
     async createComment(req, res, next) {
         try {
             ok(res, await importadex_service_1.importadexService.createComment(param(req.params.id), parse(importadex_schemas_1.commentSchema, req.body)), 201);
+        }
+        catch (error) {
+            next(error);
+        }
+    },
+    async listOperationAttachments(req, res, next) {
+        try {
+            ok(res, await importadex_service_1.importadexService.listAttachments(param(req.params.id)));
+        }
+        catch (error) {
+            next(error);
+        }
+    },
+    async uploadOperationAttachments(req, res, next) {
+        try {
+            const operationId = param(req.params.id) || String(req.body.operationId ?? "");
+            const files = getUploadedFiles(req);
+            if (!operationId) {
+                res.status(400).json({ ok: false, message: "operationId is required" });
+                return;
+            }
+            if (!files.length) {
+                res.status(400).json({ ok: false, message: "At least one file is required" });
+                return;
+            }
+            const data = await importadex_service_1.importadexService.createAttachments(operationId, files);
+            if (!data) {
+                res.status(404).json({ ok: false, message: "Operation not found" });
+                return;
+            }
+            ok(res, data, 201);
         }
         catch (error) {
             next(error);

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const importadex_controller_1 = require("../../controllers/importadex/importadex.controller");
+const processFiles_1 = require("../../middlewares/processFiles");
 const router = (0, express_1.Router)();
 router.get("/operations", importadex_controller_1.importadexController.listOperations);
 router.post("/operations", importadex_controller_1.importadexController.createOperation);
@@ -12,6 +13,9 @@ router.get("/operations/:id/events", importadex_controller_1.importadexControlle
 router.post("/operations/:id/events", importadex_controller_1.importadexController.createEvent);
 router.get("/operations/:id/comments", importadex_controller_1.importadexController.listComments);
 router.post("/operations/:id/comments", importadex_controller_1.importadexController.createComment);
+router.get("/operations/:id/attachments", importadex_controller_1.importadexController.listOperationAttachments);
+router.post("/operations/:id/attachments", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
+router.post("/attachments/upload", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
 for (const key of ["containers", "customs-files", "incidents", "documents", "attachments"]) {
     const handlers = importadex_controller_1.importadexController.tableHandlers(key);
     router.get(`/${key}`, handlers.list);

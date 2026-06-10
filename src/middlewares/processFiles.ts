@@ -1,11 +1,21 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { randomUUID } from "crypto";
+import { NextFunction, Request, Response } from "express";
 import multer from "multer";
 import sharp from "sharp";
-import { Request, Response, NextFunction } from "express";
+
+export interface UploadedFile {
+  key: string;
+  fileName: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  url: string;
+}
 
 const s3Client = new S3Client({
-  endpoint: process.env.SPACES_ENDPOINT, 
-  region: process.env.SPACES_REGION, 
+  endpoint: process.env.SPACES_ENDPOINT,
+  region: process.env.SPACES_REGION,
   credentials: {
     accessKeyId: process.env.ACCESS_KEY_ID || "",
     secretAccessKey: process.env.ACCESS_SECRET_KEY || "",
@@ -14,67 +24,128 @@ const s3Client = new S3Client({
 
 const storage = multer.memoryStorage();
 
+const allowedMimeTypes = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+  "text/plain",
+]);
+
+const sanitizeFileName = (fileName: string) => {
+  const safeName = fileName
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+
+  return safeName || "file";
+};
+
+const getBucketName = () =>
+  process.env.SPACES_NAME || process.env.SPACES_BUCKET || process.env.ACCESS_KEY_NAME;
+
+const buildPublicUrl = (bucketName: string, key: string) => {
+  const publicBase = process.env.SPACES_PUBLIC_URL?.replace(/\/+$/, "");
+  if (publicBase) return `${publicBase}/${key}`;
+
+  const endpoint = process.env.SPACES_ENDPOINT;
+  if (endpoint) {
+    const endpointUrl = new URL(endpoint.startsWith("http") ? endpoint : `https://${endpoint}`);
+    const host = endpointUrl.host.startsWith(`${bucketName}.`)
+      ? endpointUrl.host
+      : `${bucketName}.${endpointUrl.host}`;
+    return `${endpointUrl.protocol}//${host}/${key}`;
+  }
+
+  const region = process.env.SPACES_REGION || "sfo3";
+  return `https://${bucketName}.${region}.digitaloceanspaces.com/${key}`;
+};
+
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req: Request, file, cb) => {
-    if (file.mimetype.startsWith("image/") || file.mimetype === "application/pdf") {
+  fileFilter: (_req: Request, file, cb) => {
+    if (file.mimetype.startsWith("image/") || allowedMimeTypes.has(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Formato no soportado. Solo imágenes y PDFs."));
+      cb(new Error("Formato no soportado para evidencias."));
     }
   },
 }).array("files", 10);
 
-export const processAndUpload = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
+export const processFile = (req: Request, res: Response, next: NextFunction) => {
   upload(req, res, async (err) => {
-    if (err) return res.status(400).json({ message: "Error to upload files" });
+    if (err) {
+      res.status(400).json({
+        message: err instanceof Error ? err.message : "Error to upload files",
+      });
+      return;
+    }
 
     const files = req.files as Express.Multer.File[];
-    if (!files || files.length === 0) return next();
+    if (!files || files.length === 0) {
+      next();
+      return;
+    }
 
     try {
-      const uploadPromises = files.map(async (file) => {
-        let fileBuffer = file.buffer;
-        let fileName = `claims/${Date.now()}-${file.originalname}`; 
-        let contentType = file.mimetype;
+      const bucketName = getBucketName();
+      if (!bucketName) {
+        throw new Error("SPACES_NAME, SPACES_BUCKET or ACCESS_KEY_NAME is missing");
+      }
 
-        if (file.mimetype.startsWith("image/")) {
-          fileName = fileName.split(".")[0] + ".webp";
-          contentType = "image/webp";
-          fileBuffer = await sharp(file.buffer)
-            .resize(1200, 1200, { fit: "inside", withoutEnlargement: true })
-            .webp({ quality: 80 })
-            .toBuffer();
-        }
+      const uploadPrefix = process.env.SPACES_UPLOAD_PREFIX || "evidences";
+      const uploadedFiles = await Promise.all(
+        files.map(async (file): Promise<UploadedFile> => {
+          let fileBuffer = file.buffer;
+          const originalName = sanitizeFileName(file.originalname);
+          let fileName = `${randomUUID()}-${originalName}`;
+          let fileKey = `${uploadPrefix}/${fileName}`;
+          let contentType = file.mimetype;
 
-        const bucketName = process.env.SPACES_NAME; 
+          if (file.mimetype.startsWith("image/")) {
+            fileName = `${fileName.replace(/\.[^.]+$/, "")}.webp`;
+            fileKey = `${uploadPrefix}/${fileName}`;
+            contentType = "image/webp";
+            fileBuffer = await sharp(file.buffer)
+              .resize(1200, 1200, { fit: "inside", withoutEnlargement: true })
+              .webp({ quality: 80 })
+              .toBuffer();
+          }
 
-        await s3Client.send(
-          new PutObjectCommand({
-            Bucket: bucketName,
-            Key: fileName,
-            Body: fileBuffer,
-            ContentType: contentType,
-            ACL: "public-read",
-          }),
-        );
+          await s3Client.send(
+            new PutObjectCommand({
+              Bucket: bucketName,
+              Key: fileKey,
+              Body: fileBuffer,
+              ContentType: contentType,
+              ACL: "public-read",
+            }),
+          );
 
-        
-        const finalUrl = `https://${bucketName}.sfo3.digitaloceanspaces.com/${fileName}`;
-        
-        return finalUrl;
-      });
+          return {
+            key: fileKey,
+            fileName,
+            originalName: file.originalname,
+            mimeType: contentType,
+            size: fileBuffer.byteLength,
+            url: buildPublicUrl(bucketName, fileKey),
+          };
+        }),
+      );
 
-      req.body.imageUrls = await Promise.all(uploadPromises);
+      req.body.imageUrls = uploadedFiles.map((file) => file.url);
+      req.body.uploadedFiles = uploadedFiles;
       next();
-    } catch (err) {
-      console.error("Error en subida:", err);
+    } catch (error) {
+      console.error("Error en subida:", error);
       res.status(500).json({ message: "Error procesando archivos" });
     }
   });
 };
+
+export const processAndUpload = processFile;
