@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "Node16",
+    "moduleResolution": "node16",
     "rootDir": ".",
     "outDir": "dist",
     "strict": true,
@@ -11,5 +11,6 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "prisma/**/*.ts", "generated/**/*.ts"]
+  "include": ["src/**/*.ts", "prisma/**/*.ts"],
+"exclude": ["generated", "dist", "node_modules"]
 }
