@@ -22,4 +22,4 @@ RUN pnpm run db:generate
 RUN NODE_OPTIONS="--max-old-space-size=2048" pnpm run build
 
 EXPOSE 3000
-CMD ["node", "dist/app/src/App.js"]
+CMD ["node", "./dist/src/App.js"]
