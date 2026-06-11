@@ -2,7 +2,12 @@ import { randomUUID } from "crypto";
 import { prisma } from "../../config/connectionDB";
 import type { UploadedFile } from "../../middlewares/processFiles";
 
-export type TableKey = "containers" | "customs-files" | "incidents" | "documents" | "attachments";
+export type TableKey =
+  | "containers"
+  | "customs-files"
+  | "incidents"
+  | "documents"
+  | "attachments";
 
 const tableMap: Record<TableKey, string> = {
   containers: "importadex_containers",
@@ -70,11 +75,22 @@ function normalizePayload(payload: Record<string, unknown>) {
   return Object.fromEntries(
     Object.entries(payload)
       .filter(([, value]) => value !== undefined)
-      .map(([key, value]) => [toColumn(key), key.endsWith("At") || key === "eta" || key === "returnLimit" ? toDate(value) : value]),
+      .map(([key, value]) => [
+        toColumn(key),
+        key.endsWith("At") || key === "eta" || key === "returnLimit"
+          ? toDate(value)
+          : value,
+      ]),
   );
 }
 
-async function audit(action: string, entity: string, entityId: string | null, operationId: string | null, changes?: unknown) {
+async function audit(
+  action: string,
+  entity: string,
+  entityId: string | null,
+  operationId: string | null,
+  changes?: unknown,
+) {
   await prisma.$executeRawUnsafe(
     `INSERT INTO importadex_audit_logs (id, action, entity, entity_id, operation_id, changes)
      VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
@@ -101,11 +117,17 @@ async function insert(table: string, payload: Record<string, unknown>) {
   return rows[0];
 }
 
-async function patch(table: string, id: string, payload: Record<string, unknown>) {
+async function patch(
+  table: string,
+  id: string,
+  payload: Record<string, unknown>,
+) {
   const data = normalizePayload(payload);
   const columns = Object.keys(data);
   if (columns.length === 0) return findById(table, id);
-  const assignments = columns.map((column, index) => `"${column}" = $${index + 2}`).join(", ");
+  const assignments = columns
+    .map((column, index) => `"${column}" = $${index + 2}`)
+    .join(", ");
   const rows = await prisma.$queryRawUnsafe<unknown[]>(
     `UPDATE ${table} SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`,
     id,
@@ -115,12 +137,19 @@ async function patch(table: string, id: string, payload: Record<string, unknown>
 }
 
 async function findById(table: string, id: string) {
-  const rows = await prisma.$queryRawUnsafe<unknown[]>(`SELECT * FROM ${table} WHERE id = $1`, id);
+  const rows = await prisma.$queryRawUnsafe<unknown[]>(
+    `SELECT * FROM ${table} WHERE id = $1`,
+    id,
+  );
   return rows[0] ?? null;
 }
 
 export const importadexService = {
-  async listOperations(filters: { q?: string; status?: string; mode?: string }) {
+  async listOperations(filters: {
+    q?: string;
+    status?: string;
+    mode?: string;
+  }) {
     const clauses = [`is_active = true`];
     const values: unknown[] = [];
     if (filters.status) {
@@ -133,7 +162,9 @@ export const importadexService = {
     }
     if (filters.q) {
       values.push(`%${filters.q}%`);
-      clauses.push(`(code ILIKE $${values.length} OR client_name ILIKE $${values.length} OR reference ILIKE $${values.length})`);
+      clauses.push(
+        `(code ILIKE $${values.length} OR client_name ILIKE $${values.length} OR reference ILIKE $${values.length})`,
+      );
     }
 
     return prisma.$queryRawUnsafe<unknown[]>(
@@ -164,15 +195,23 @@ export const importadexService = {
   },
 
   async createOperation(payload: Record<string, unknown>) {
-    const code = payload.code ?? `IMPX-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
-    const operation = await insert("importadex_operations", { ...payload, code });
+    const code =
+      payload.code ??
+      `IMPX-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+    const operation = await insert("importadex_operations", {
+      ...payload,
+      code,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
     const operationId = (operation as { id: string }).id;
     await audit("CREATE", "operation", operationId, operationId, operation);
     await insert("importadex_events", {
-      operationId,
+      operation_id: operationId,
       event: "Operacion creada",
       owner: "system",
       location: payload.origin,
+      created_at: new Date(),
     });
     return this.getOperation(operationId);
   },
@@ -196,12 +235,20 @@ export const importadexService = {
   },
 
   async listTable(key: TableKey) {
-    return prisma.$queryRawUnsafe<unknown[]>(`SELECT * FROM ${tableMap[key]} ORDER BY created_at DESC`);
+    return prisma.$queryRawUnsafe<unknown[]>(
+      `SELECT * FROM ${tableMap[key]} ORDER BY created_at DESC`,
+    );
   },
 
   async createTable(key: TableKey, payload: Record<string, unknown>) {
     const item = await insert(tableMap[key], payload);
-    await audit("CREATE", key, (item as { id: string }).id, payload.operationId as string, item);
+    await audit(
+      "CREATE",
+      key,
+      (item as { id: string }).id,
+      payload.operationId as string,
+      item,
+    );
     return item;
   },
 
@@ -234,16 +281,28 @@ export const importadexService = {
       operationId,
       event: "Evidencia cargada",
       owner: "system",
-      location: files.map((file) => file.originalName || file.fileName).join(", "),
+      location: files
+        .map((file) => file.originalName || file.fileName)
+        .join(", "),
     });
     await audit("CREATE", "attachments", null, operationId, attachments);
 
     return this.getOperation(operationId);
   },
 
-  async updateTable(key: TableKey, id: string, payload: Record<string, unknown>) {
+  async updateTable(
+    key: TableKey,
+    id: string,
+    payload: Record<string, unknown>,
+  ) {
     const item = await patch(tableMap[key], id, payload);
-    await audit("UPDATE", key, id, (item as { operation_id?: string } | null)?.operation_id ?? null, payload);
+    await audit(
+      "UPDATE",
+      key,
+      id,
+      (item as { operation_id?: string } | null)?.operation_id ?? null,
+      payload,
+    );
     return item;
   },
 
@@ -255,8 +314,17 @@ export const importadexService = {
   },
 
   async createEvent(operationId: string, payload: Record<string, unknown>) {
-    const event = await insert("importadex_events", { ...payload, operationId });
-    await audit("CREATE", "event", (event as { id: string }).id, operationId, event);
+    const event = await insert("importadex_events", {
+      ...payload,
+      operationId,
+    });
+    await audit(
+      "CREATE",
+      "event",
+      (event as { id: string }).id,
+      operationId,
+      event,
+    );
     return event;
   },
 
@@ -268,14 +336,23 @@ export const importadexService = {
   },
 
   async createComment(operationId: string, payload: Record<string, unknown>) {
-    const comment = await insert("importadex_comments", { ...payload, operationId });
-    await audit("CREATE", "comment", (comment as { id: string }).id, operationId, comment);
+    const comment = await insert("importadex_comments", {
+      ...payload,
+      operationId,
+    });
+    await audit(
+      "CREATE",
+      "comment",
+      (comment as { id: string }).id,
+      operationId,
+      comment,
+    );
     return comment;
   },
 
   async catalogs() {
     return prisma.$queryRawUnsafe<unknown[]>(
-      "SELECT \"group\", value, label FROM importadex_catalogs WHERE active = true ORDER BY \"group\", label",
+      'SELECT "group", value, label FROM importadex_catalogs WHERE active = true ORDER BY "group", label',
     );
   },
 

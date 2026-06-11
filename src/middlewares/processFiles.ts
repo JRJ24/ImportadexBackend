@@ -61,7 +61,7 @@ const buildPublicUrl = (bucketName: string, key: string) => {
     return `${endpointUrl.protocol}//${host}/${key}`;
   }
 
-  const region = process.env.SPACES_REGION || "sfo3";
+  const region = process.env.SPACES_REGION || "nyc3";
   return `https://${bucketName}.${region}.digitaloceanspaces.com/${key}`;
 };
 
