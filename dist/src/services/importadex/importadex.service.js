@@ -63,7 +63,12 @@ function toDate(value) {
 function normalizePayload(payload) {
     return Object.fromEntries(Object.entries(payload)
         .filter(([, value]) => value !== undefined)
-        .map(([key, value]) => [toColumn(key), key.endsWith("At") || key === "eta" || key === "returnLimit" ? toDate(value) : value]));
+        .map(([key, value]) => [
+        toColumn(key),
+        key.endsWith("At") || key === "eta" || key === "returnLimit"
+            ? toDate(value)
+            : value,
+    ]));
 }
 async function audit(action, entity, entityId, operationId, changes) {
     await connectionDB_1.prisma.$executeRawUnsafe(`INSERT INTO importadex_audit_logs (id, action, entity, entity_id, operation_id, changes)
@@ -84,7 +89,9 @@ async function patch(table, id, payload) {
     const columns = Object.keys(data);
     if (columns.length === 0)
         return findById(table, id);
-    const assignments = columns.map((column, index) => `"${column}" = $${index + 2}`).join(", ");
+    const assignments = columns
+        .map((column, index) => `"${column}" = $${index + 2}`)
+        .join(", ");
     const rows = await connectionDB_1.prisma.$queryRawUnsafe(`UPDATE ${table} SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`, id, ...Object.values(data));
     return rows[0] ?? null;
 }
@@ -128,15 +135,41 @@ exports.importadexService = {
         return rows[0] ?? null;
     },
     async createOperation(payload) {
-        const code = payload.code ?? `IMPX-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
-        const operation = await insert("importadex_operations", { ...payload, code });
+        const { container, ...operationPayload } = payload;
+        const code = operationPayload.code ??
+            `IMPX-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+        const operation = await insert("importadex_operations", {
+            ...operationPayload,
+            code,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        });
         const operationId = operation.id;
+        if (operationPayload.cargoType === "CONTAINERIZED" && container && typeof container === "object") {
+            const initialContainer = container;
+            const containerNumber = typeof initialContainer.number === "string" && initialContainer.number.trim()
+                ? initialContainer.number.trim()
+                : `PEND-${String(code).replace(/[^a-zA-Z0-9-]/g, "").slice(-12)}`;
+            await insert("importadex_containers", {
+                operationId,
+                number: containerNumber,
+                type: initialContainer.type,
+                seal: initialContainer.seal ?? null,
+                carrier: initialContainer.carrier ?? operationPayload.carrier ?? null,
+                freeDays: initialContainer.freeDays ?? 0,
+                returnLimit: initialContainer.returnLimit ?? null,
+                status: initialContainer.status ?? "TYPE_SELECTED",
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            });
+        }
         await audit("CREATE", "operation", operationId, operationId, operation);
         await insert("importadex_events", {
-            operationId,
+            operation_id: operationId,
             event: "Operacion creada",
             owner: "system",
-            location: payload.origin,
+            location: operationPayload.origin,
+            created_at: new Date(),
         });
         return this.getOperation(operationId);
     },
@@ -184,7 +217,9 @@ exports.importadexService = {
             operationId,
             event: "Evidencia cargada",
             owner: "system",
-            location: files.map((file) => file.originalName || file.fileName).join(", "),
+            location: files
+                .map((file) => file.originalName || file.fileName)
+                .join(", "),
         });
         await audit("CREATE", "attachments", null, operationId, attachments);
         return this.getOperation(operationId);
@@ -198,7 +233,10 @@ exports.importadexService = {
         return connectionDB_1.prisma.$queryRawUnsafe("SELECT * FROM importadex_events WHERE operation_id = $1 ORDER BY event_date ASC", operationId);
     },
     async createEvent(operationId, payload) {
-        const event = await insert("importadex_events", { ...payload, operationId });
+        const event = await insert("importadex_events", {
+            ...payload,
+            operationId,
+        });
         await audit("CREATE", "event", event.id, operationId, event);
         return event;
     },
@@ -206,12 +244,15 @@ exports.importadexService = {
         return connectionDB_1.prisma.$queryRawUnsafe("SELECT * FROM importadex_comments WHERE operation_id = $1 ORDER BY created_at ASC", operationId);
     },
     async createComment(operationId, payload) {
-        const comment = await insert("importadex_comments", { ...payload, operationId });
+        const comment = await insert("importadex_comments", {
+            ...payload,
+            operationId,
+        });
         await audit("CREATE", "comment", comment.id, operationId, comment);
         return comment;
     },
     async catalogs() {
-        return connectionDB_1.prisma.$queryRawUnsafe("SELECT \"group\", value, label FROM importadex_catalogs WHERE active = true ORDER BY \"group\", label");
+        return connectionDB_1.prisma.$queryRawUnsafe('SELECT "group", value, label FROM importadex_catalogs WHERE active = true ORDER BY "group", label');
     },
     async dashboard() {
         const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT

@@ -2,6 +2,15 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.patchSchemas = exports.attachmentSchema = exports.documentSchema = exports.incidentSchema = exports.customsFileSchema = exports.containerSchema = exports.commentSchema = exports.eventSchema = exports.statusSchema = exports.operationPatchSchema = exports.operationSchema = void 0;
 const zod_1 = require("zod");
+const operationContainerSchema = zod_1.z.object({
+    number: zod_1.z.string().trim().min(1).optional().nullable(),
+    type: zod_1.z.string().trim().min(1),
+    seal: zod_1.z.string().trim().min(1).optional().nullable(),
+    carrier: zod_1.z.string().trim().min(1).optional().nullable(),
+    freeDays: zod_1.z.number().int().min(0).optional(),
+    returnLimit: zod_1.z.string().datetime().optional().nullable(),
+    status: zod_1.z.string().trim().min(1).optional(),
+});
 exports.operationSchema = zod_1.z.object({
     code: zod_1.z.string().min(3).optional(),
     clientName: zod_1.z.string().min(2),
@@ -32,8 +41,9 @@ exports.operationSchema = zod_1.z.object({
     reference: zod_1.z.string().optional().nullable(),
     eta: zod_1.z.string().datetime().optional().nullable(),
     progress: zod_1.z.number().int().min(0).max(100).optional(),
+    container: operationContainerSchema.optional().nullable(),
 });
-exports.operationPatchSchema = exports.operationSchema.partial();
+exports.operationPatchSchema = exports.operationSchema.omit({ container: true }).partial();
 exports.statusSchema = zod_1.z.object({
     status: exports.operationSchema.shape.status.unwrap(),
     note: zod_1.z.string().optional(),

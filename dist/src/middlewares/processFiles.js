@@ -6,7 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.processAndUpload = exports.processFile = void 0;
 const client_s3_1 = require("@aws-sdk/client-s3");
 const crypto_1 = require("crypto");
+const promises_1 = require("fs/promises");
 const multer_1 = __importDefault(require("multer"));
+const path_1 = __importDefault(require("path"));
 const sharp_1 = __importDefault(require("sharp"));
 const s3Client = new client_s3_1.S3Client({
     endpoint: process.env.SPACES_ENDPOINT,
@@ -48,8 +50,15 @@ const buildPublicUrl = (bucketName, key) => {
             : `${bucketName}.${endpointUrl.host}`;
         return `${endpointUrl.protocol}//${host}/${key}`;
     }
-    const region = process.env.SPACES_REGION || "sfo3";
+    const region = process.env.SPACES_REGION || "nyc3";
     return `https://${bucketName}.${region}.digitaloceanspaces.com/${key}`;
+};
+const getLocalPublicRoot = () => process.env.LOCAL_UPLOAD_DIR || path_1.default.join(__dirname, "..", "public");
+const buildLocalPublicUrl = (req, key) => {
+    const publicBase = process.env.LOCAL_UPLOAD_PUBLIC_URL?.replace(/\/+$/, "");
+    if (publicBase)
+        return `${publicBase}/${key}`;
+    return `${req.protocol}://${req.get("host")}/${key}`;
 };
 const upload = (0, multer_1.default)({
     storage,
@@ -78,9 +87,6 @@ const processFile = (req, res, next) => {
         }
         try {
             const bucketName = getBucketName();
-            if (!bucketName) {
-                throw new Error("SPACES_NAME, SPACES_BUCKET or ACCESS_KEY_NAME is missing");
-            }
             const uploadPrefix = process.env.SPACES_UPLOAD_PREFIX || "evidences";
             const uploadedFiles = await Promise.all(files.map(async (file) => {
                 let fileBuffer = file.buffer;
@@ -97,20 +103,27 @@ const processFile = (req, res, next) => {
                         .webp({ quality: 80 })
                         .toBuffer();
                 }
-                await s3Client.send(new client_s3_1.PutObjectCommand({
-                    Bucket: bucketName,
-                    Key: fileKey,
-                    Body: fileBuffer,
-                    ContentType: contentType,
-                    ACL: "public-read",
-                }));
+                if (bucketName) {
+                    await s3Client.send(new client_s3_1.PutObjectCommand({
+                        Bucket: bucketName,
+                        Key: fileKey,
+                        Body: fileBuffer,
+                        ContentType: contentType,
+                        ACL: "public-read",
+                    }));
+                }
+                else {
+                    const localPath = path_1.default.join(getLocalPublicRoot(), ...fileKey.split("/"));
+                    await (0, promises_1.mkdir)(path_1.default.dirname(localPath), { recursive: true });
+                    await (0, promises_1.writeFile)(localPath, fileBuffer);
+                }
                 return {
                     key: fileKey,
                     fileName,
                     originalName: file.originalname,
                     mimeType: contentType,
                     size: fileBuffer.byteLength,
-                    url: buildPublicUrl(bucketName, fileKey),
+                    url: bucketName ? buildPublicUrl(bucketName, fileKey) : buildLocalPublicUrl(req, fileKey),
                 };
             }));
             req.body.imageUrls = uploadedFiles.map((file) => file.url);

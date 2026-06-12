@@ -1,7 +1,9 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { randomUUID } from "crypto";
+import { mkdir, writeFile } from "fs/promises";
 import { NextFunction, Request, Response } from "express";
 import multer from "multer";
+import path from "path";
 import sharp from "sharp";
 
 export interface UploadedFile {
@@ -65,6 +67,16 @@ const buildPublicUrl = (bucketName: string, key: string) => {
   return `https://${bucketName}.${region}.digitaloceanspaces.com/${key}`;
 };
 
+const getLocalPublicRoot = () =>
+  process.env.LOCAL_UPLOAD_DIR || path.join(__dirname, "..", "public");
+
+const buildLocalPublicUrl = (req: Request, key: string) => {
+  const publicBase = process.env.LOCAL_UPLOAD_PUBLIC_URL?.replace(/\/+$/, "");
+  if (publicBase) return `${publicBase}/${key}`;
+
+  return `${req.protocol}://${req.get("host")}/${key}`;
+};
+
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -94,10 +106,6 @@ export const processFile = (req: Request, res: Response, next: NextFunction) => 
 
     try {
       const bucketName = getBucketName();
-      if (!bucketName) {
-        throw new Error("SPACES_NAME, SPACES_BUCKET or ACCESS_KEY_NAME is missing");
-      }
-
       const uploadPrefix = process.env.SPACES_UPLOAD_PREFIX || "evidences";
       const uploadedFiles = await Promise.all(
         files.map(async (file): Promise<UploadedFile> => {
@@ -117,15 +125,21 @@ export const processFile = (req: Request, res: Response, next: NextFunction) => 
               .toBuffer();
           }
 
-          await s3Client.send(
-            new PutObjectCommand({
-              Bucket: bucketName,
-              Key: fileKey,
-              Body: fileBuffer,
-              ContentType: contentType,
-              ACL: "public-read",
-            }),
-          );
+          if (bucketName) {
+            await s3Client.send(
+              new PutObjectCommand({
+                Bucket: bucketName,
+                Key: fileKey,
+                Body: fileBuffer,
+                ContentType: contentType,
+                ACL: "public-read",
+              }),
+            );
+          } else {
+            const localPath = path.join(getLocalPublicRoot(), ...fileKey.split("/"));
+            await mkdir(path.dirname(localPath), { recursive: true });
+            await writeFile(localPath, fileBuffer);
+          }
 
           return {
             key: fileKey,
@@ -133,7 +147,7 @@ export const processFile = (req: Request, res: Response, next: NextFunction) => 
             originalName: file.originalname,
             mimeType: contentType,
             size: fileBuffer.byteLength,
-            url: buildPublicUrl(bucketName, fileKey),
+            url: bucketName ? buildPublicUrl(bucketName, fileKey) : buildLocalPublicUrl(req, fileKey),
           };
         }),
       );

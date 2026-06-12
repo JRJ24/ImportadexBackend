@@ -195,22 +195,45 @@ export const importadexService = {
   },
 
   async createOperation(payload: Record<string, unknown>) {
+    const { container, ...operationPayload } = payload;
     const code =
-      payload.code ??
+      operationPayload.code ??
       `IMPX-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
     const operation = await insert("importadex_operations", {
-      ...payload,
+      ...operationPayload,
       code,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
     const operationId = (operation as { id: string }).id;
+
+    if (operationPayload.cargoType === "CONTAINERIZED" && container && typeof container === "object") {
+      const initialContainer = container as Record<string, unknown>;
+      const containerNumber =
+        typeof initialContainer.number === "string" && initialContainer.number.trim()
+          ? initialContainer.number.trim()
+          : `PEND-${String(code).replace(/[^a-zA-Z0-9-]/g, "").slice(-12)}`;
+
+      await insert("importadex_containers", {
+        operationId,
+        number: containerNumber,
+        type: initialContainer.type,
+        seal: initialContainer.seal ?? null,
+        carrier: initialContainer.carrier ?? operationPayload.carrier ?? null,
+        freeDays: initialContainer.freeDays ?? 0,
+        returnLimit: initialContainer.returnLimit ?? null,
+        status: initialContainer.status ?? "TYPE_SELECTED",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
     await audit("CREATE", "operation", operationId, operationId, operation);
     await insert("importadex_events", {
       operation_id: operationId,
       event: "Operacion creada",
       owner: "system",
-      location: payload.origin,
+      location: operationPayload.origin,
       created_at: new Date(),
     });
     return this.getOperation(operationId);

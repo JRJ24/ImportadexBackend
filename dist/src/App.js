@@ -52,7 +52,7 @@ app.use(morgan.default("dev"));
 app.use(express_1.default.urlencoded({ extended: true }));
 app.use(express_1.default.static(path_1.default.join(__dirname, "public")));
 app.use(express_1.default.json());
-app.use("/api", Routes_1.default);
+app.use("/api-alt", Routes_1.default);
 app.use((req, res) => {
     res.status(404).json({
         message: "Route not found",

@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+const operationContainerSchema = z.object({
+  number: z.string().trim().min(1).optional().nullable(),
+  type: z.string().trim().min(1),
+  seal: z.string().trim().min(1).optional().nullable(),
+  carrier: z.string().trim().min(1).optional().nullable(),
+  freeDays: z.number().int().min(0).optional(),
+  returnLimit: z.string().datetime().optional().nullable(),
+  status: z.string().trim().min(1).optional(),
+});
+
 export const operationSchema = z.object({
   code: z.string().min(3).optional(),
   clientName: z.string().min(2),
@@ -30,9 +40,10 @@ export const operationSchema = z.object({
   reference: z.string().optional().nullable(),
   eta: z.string().datetime().optional().nullable(),
   progress: z.number().int().min(0).max(100).optional(),
+  container: operationContainerSchema.optional().nullable(),
 });
 
-export const operationPatchSchema = operationSchema.partial();
+export const operationPatchSchema = operationSchema.omit({ container: true }).partial();
 
 export const statusSchema = z.object({
   status: operationSchema.shape.status.unwrap(),
