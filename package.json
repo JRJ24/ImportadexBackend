@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "cross-env DEBUG=app tsx watch src/App.ts",
-    "start": "node ./dist/app.js",
+    "start": "node ./dist/src/App.js",
     "build": "tsc && tsc-alias",
     "clean": "rimraf ./dist && mkdir dist",
     "db:migrate": "prisma migrate dev",
