@@ -6,6 +6,12 @@ const importadex_schemas_1 = require("../../validators/importadex.schemas");
 const ok = (res, data, status = 200) => res.status(status).json({ ok: true, data });
 const parse = (schema, data) => schema.parse(data);
 const param = (value) => (Array.isArray(value) ? value[0] : value ?? "");
+const handleServiceError = (res, error) => {
+    if (!(error instanceof importadex_service_1.ImportadexServiceError))
+        return false;
+    res.status(error.status).json({ ok: false, message: error.message });
+    return true;
+};
 const getUploadedFiles = (req) => {
     const body = req.body;
     if (Array.isArray(body.uploadedFiles)) {
@@ -126,7 +132,9 @@ exports.importadexController = {
     },
     async uploadOperationAttachments(req, res, next) {
         try {
-            const operationId = param(req.params.id) || String(req.body.operationId ?? "");
+            const body = req.body;
+            const operationId = param(req.params.id) || String(body.operationId ?? "");
+            const documentId = body.documentId ? String(body.documentId) : null;
             const files = getUploadedFiles(req);
             if (!operationId) {
                 res.status(400).json({ ok: false, message: "operationId is required" });
@@ -136,7 +144,7 @@ exports.importadexController = {
                 res.status(400).json({ ok: false, message: "At least one file is required" });
                 return;
             }
-            const data = await importadex_service_1.importadexService.createAttachments(operationId, files);
+            const data = await importadex_service_1.importadexService.createAttachments(operationId, files, documentId);
             if (!data) {
                 res.status(404).json({ ok: false, message: "Operation not found" });
                 return;
@@ -169,6 +177,8 @@ exports.importadexController = {
                     ok(res, await importadex_service_1.importadexService.createTable(key, parse(schemas[key], req.body)), 201);
                 }
                 catch (error) {
+                    if (handleServiceError(res, error))
+                        return;
                     next(error);
                 }
             },

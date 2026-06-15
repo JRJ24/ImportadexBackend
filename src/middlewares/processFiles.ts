@@ -7,6 +7,7 @@ import path from "path";
 import sharp from "sharp";
 
 export interface UploadedFile {
+  fieldName?: string;
   key: string;
   fileName: string;
   originalName: string;
@@ -34,6 +35,8 @@ const allowedMimeTypes = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/csv",
   "text/plain",
+  "video/mp4",
+  "video/quicktime",
 ]);
 
 const sanitizeFileName = (fileName: string) => {
@@ -79,7 +82,10 @@ const buildLocalPublicUrl = (req: Request, key: string) => {
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: {
+    fileSize: Number(process.env.MAX_UPLOAD_MB || 50) * 1024 * 1024,
+    files: 10,
+  },
   fileFilter: (_req: Request, file, cb) => {
     if (file.mimetype.startsWith("image/") || allowedMimeTypes.has(file.mimetype)) {
       cb(null, true);
@@ -87,7 +93,7 @@ const upload = multer({
       cb(new Error("Formato no soportado para evidencias."));
     }
   },
-}).array("files", 10);
+}).any();
 
 export const processFile = (req: Request, res: Response, next: NextFunction) => {
   upload(req, res, async (err) => {
@@ -142,6 +148,7 @@ export const processFile = (req: Request, res: Response, next: NextFunction) => 
           }
 
           return {
+            fieldName: file.fieldname,
             key: fileKey,
             fileName,
             originalName: file.originalname,

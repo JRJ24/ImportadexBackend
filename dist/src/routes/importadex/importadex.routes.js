@@ -1,7 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const importadex_client_controller_1 = require("../../controllers/importadex/importadex-client.controller");
 const importadex_controller_1 = require("../../controllers/importadex/importadex.controller");
+const importadexAdmin_1 = require("../../middlewares/importadexAdmin");
 const processFiles_1 = require("../../middlewares/processFiles");
 const router = (0, express_1.Router)();
 router.get("/operations", importadex_controller_1.importadexController.listOperations);
@@ -16,6 +18,11 @@ router.post("/operations/:id/comments", importadex_controller_1.importadexContro
 router.get("/operations/:id/attachments", importadex_controller_1.importadexController.listOperationAttachments);
 router.post("/operations/:id/attachments", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
 router.post("/attachments/upload", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
+router.post("/clients/register", processFiles_1.processFile, importadex_client_controller_1.importadexClientController.register);
+router.get("/clients", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.list);
+router.get("/clients/:id", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.get);
+router.patch("/clients/:id/approve", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.approve);
+router.patch("/clients/:id/reject", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.reject);
 for (const key of ["containers", "customs-files", "incidents", "documents", "attachments"]) {
     const handlers = importadex_controller_1.importadexController.tableHandlers(key);
     router.get(`/${key}`, handlers.list);

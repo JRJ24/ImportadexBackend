@@ -1,7 +1,30 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.patchSchemas = exports.attachmentSchema = exports.documentSchema = exports.incidentSchema = exports.customsFileSchema = exports.containerSchema = exports.commentSchema = exports.eventSchema = exports.statusSchema = exports.operationPatchSchema = exports.operationSchema = void 0;
+exports.importadexClientReviewSchema = exports.importadexClientRegisterSchema = exports.patchSchemas = exports.attachmentSchema = exports.documentSchema = exports.incidentSchema = exports.customsFileSchema = exports.containerSchema = exports.commentSchema = exports.eventSchema = exports.statusSchema = exports.operationPatchSchema = exports.operationSchema = void 0;
 const zod_1 = require("zod");
+const formBoolean = zod_1.z.preprocess((value) => {
+    if (typeof value === "boolean")
+        return value;
+    if (typeof value !== "string")
+        return value;
+    return ["1", "true", "si", "sí", "yes"].includes(value.trim().toLowerCase());
+}, zod_1.z.boolean());
+const typeClientSchema = zod_1.z.preprocess((value) => {
+    if (typeof value !== "string")
+        return value;
+    const normalized = value.trim().toUpperCase();
+    if (["CORPORATIVO", "CORPORATE", "CORPORATIVE"].includes(normalized))
+        return "CORPORATIVE";
+    return "PERSONAL";
+}, zod_1.z.enum(["PERSONAL", "CORPORATIVE"]));
+const typeIdentificationSchema = zod_1.z.preprocess((value) => {
+    if (typeof value !== "string")
+        return value;
+    const normalized = value.trim().toUpperCase();
+    if (["RNC", "REGISTRO"].includes(normalized))
+        return "RNC";
+    return "DNI";
+}, zod_1.z.enum(["DNI", "RNC"]));
 const operationContainerSchema = zod_1.z.object({
     number: zod_1.z.string().trim().min(1).optional().nullable(),
     type: zod_1.z.string().trim().min(1),
@@ -10,6 +33,31 @@ const operationContainerSchema = zod_1.z.object({
     freeDays: zod_1.z.number().int().min(0).optional(),
     returnLimit: zod_1.z.string().datetime().optional().nullable(),
     status: zod_1.z.string().trim().min(1).optional(),
+});
+const operationDocumentSchema = zod_1.z.object({
+    name: zod_1.z.string().trim().min(2),
+    type: zod_1.z.string().trim().min(1),
+    status: zod_1.z.string().trim().min(1).optional(),
+    owner: zod_1.z.string().trim().optional().nullable(),
+    url: zod_1.z.string().url().optional().nullable(),
+});
+const operationCustomsFileSchema = zod_1.z.object({
+    declarationNo: zod_1.z.string().trim().optional().nullable(),
+    regime: zod_1.z.string().trim().optional().nullable(),
+    channel: zod_1.z.string().trim().optional().nullable(),
+    status: zod_1.z.string().trim().optional(),
+    responsible: zod_1.z.string().trim().optional().nullable(),
+    submittedAt: zod_1.z.string().datetime().optional().nullable(),
+    releasedAt: zod_1.z.string().datetime().optional().nullable(),
+});
+const operationIncidentSchema = zod_1.z.object({
+    type: zod_1.z.string().trim().min(2),
+    severity: zod_1.z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+    status: zod_1.z.enum(["OPEN", "IN_PROGRESS", "BLOCKED", "RESOLVED", "CANCELLED"]).optional(),
+    owner: zod_1.z.string().trim().optional().nullable(),
+    description: zod_1.z.string().trim().optional().nullable(),
+    dueAt: zod_1.z.string().datetime().optional().nullable(),
+    resolvedAt: zod_1.z.string().datetime().optional().nullable(),
 });
 exports.operationSchema = zod_1.z.object({
     code: zod_1.z.string().min(3).optional(),
@@ -42,8 +90,12 @@ exports.operationSchema = zod_1.z.object({
     eta: zod_1.z.string().datetime().optional().nullable(),
     progress: zod_1.z.number().int().min(0).max(100).optional(),
     container: operationContainerSchema.optional().nullable(),
+    containers: zod_1.z.array(operationContainerSchema).optional(),
+    documents: zod_1.z.array(operationDocumentSchema).optional(),
+    customsFile: operationCustomsFileSchema.optional().nullable(),
+    incidents: zod_1.z.array(operationIncidentSchema).optional(),
 });
-exports.operationPatchSchema = exports.operationSchema.omit({ container: true }).partial();
+exports.operationPatchSchema = exports.operationSchema.omit({ container: true, containers: true, documents: true, customsFile: true, incidents: true }).partial();
 exports.statusSchema = zod_1.z.object({
     status: exports.operationSchema.shape.status.unwrap(),
     note: zod_1.z.string().optional(),
@@ -98,6 +150,7 @@ exports.documentSchema = zod_1.z.object({
 });
 exports.attachmentSchema = zod_1.z.object({
     operationId: zod_1.z.string().min(1),
+    documentId: zod_1.z.string().min(1).optional().nullable(),
     fileName: zod_1.z.string().min(1),
     fileUrl: zod_1.z.string().url(),
     fileType: zod_1.z.string().optional().nullable(),
@@ -109,3 +162,21 @@ exports.patchSchemas = {
     documents: exports.documentSchema.partial().omit({ operationId: true }),
     attachments: exports.attachmentSchema.partial().omit({ operationId: true }),
 };
+exports.importadexClientRegisterSchema = zod_1.z.object({
+    type: typeClientSchema,
+    name: zod_1.z.string().trim().min(2),
+    lastName: zod_1.z.string().trim().optional().nullable(),
+    adress: zod_1.z.string().trim().min(2),
+    typeIdentification: typeIdentificationSchema,
+    identification: zod_1.z.string().trim().min(3),
+    gender: zod_1.z.string().trim().optional().nullable(),
+    birthDate: zod_1.z.string().trim().optional().nullable(),
+    phoneHomeOffice: zod_1.z.string().trim().min(3),
+    phonePersonal: zod_1.z.string().trim().optional().nullable(),
+    email: zod_1.z.string().trim().email().transform((email) => email.toLowerCase()),
+    feedBack: zod_1.z.string().trim().optional().nullable(),
+    hasDgaToken: formBoolean,
+});
+exports.importadexClientReviewSchema = zod_1.z.object({
+    feedBack: zod_1.z.string().trim().optional().nullable(),
+});

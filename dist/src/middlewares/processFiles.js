@@ -27,6 +27,8 @@ const allowedMimeTypes = new Set([
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "text/csv",
     "text/plain",
+    "video/mp4",
+    "video/quicktime",
 ]);
 const sanitizeFileName = (fileName) => {
     const safeName = fileName
@@ -62,7 +64,10 @@ const buildLocalPublicUrl = (req, key) => {
 };
 const upload = (0, multer_1.default)({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 },
+    limits: {
+        fileSize: Number(process.env.MAX_UPLOAD_MB || 50) * 1024 * 1024,
+        files: 10,
+    },
     fileFilter: (_req, file, cb) => {
         if (file.mimetype.startsWith("image/") || allowedMimeTypes.has(file.mimetype)) {
             cb(null, true);
@@ -71,7 +76,7 @@ const upload = (0, multer_1.default)({
             cb(new Error("Formato no soportado para evidencias."));
         }
     },
-}).array("files", 10);
+}).any();
 const processFile = (req, res, next) => {
     upload(req, res, async (err) => {
         if (err) {
@@ -118,6 +123,7 @@ const processFile = (req, res, next) => {
                     await (0, promises_1.writeFile)(localPath, fileBuffer);
                 }
                 return {
+                    fieldName: file.fieldname,
                     key: fileKey,
                     fileName,
                     originalName: file.originalname,

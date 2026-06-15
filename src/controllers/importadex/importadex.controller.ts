@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import type { ZodType } from "zod";
-import { importadexService, type TableKey } from "../../services/importadex/importadex.service";
+import { ImportadexServiceError, importadexService, type TableKey } from "../../services/importadex/importadex.service";
 import type { UploadedFile } from "../../middlewares/processFiles";
 import {
   attachmentSchema,
@@ -21,6 +21,13 @@ const ok = (res: Response, data: unknown, status = 200) => res.status(status).js
 const parse = (schema: ZodType, data: unknown) => schema.parse(data) as Record<string, unknown>;
 
 const param = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value ?? "");
+
+const handleServiceError = (res: Response, error: unknown) => {
+  if (!(error instanceof ImportadexServiceError)) return false;
+
+  res.status(error.status).json({ ok: false, message: error.message });
+  return true;
+};
 
 const getUploadedFiles = (req: Request) => {
   const body = req.body as {
@@ -149,7 +156,9 @@ export const importadexController = {
 
   async uploadOperationAttachments(req: Request, res: Response, next: NextFunction) {
     try {
-      const operationId = param(req.params.id) || String((req.body as { operationId?: string }).operationId ?? "");
+      const body = req.body as { operationId?: string; documentId?: string };
+      const operationId = param(req.params.id) || String(body.operationId ?? "");
+      const documentId = body.documentId ? String(body.documentId) : null;
       const files = getUploadedFiles(req);
 
       if (!operationId) {
@@ -162,7 +171,7 @@ export const importadexController = {
         return;
       }
 
-      const data = await importadexService.createAttachments(operationId, files);
+      const data = await importadexService.createAttachments(operationId, files, documentId);
       if (!data) {
         res.status(404).json({ ok: false, message: "Operation not found" });
         return;
@@ -195,6 +204,7 @@ export const importadexController = {
         try {
           ok(res, await importadexService.createTable(key, parse(schemas[key], req.body)), 201);
         } catch (error) {
+          if (handleServiceError(res, error)) return;
           next(error);
         }
       },

@@ -1,5 +1,26 @@
 import { z } from "zod";
 
+const formBoolean = z.preprocess((value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return value;
+
+  return ["1", "true", "si", "sí", "yes"].includes(value.trim().toLowerCase());
+}, z.boolean());
+
+const typeClientSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().toUpperCase();
+  if (["CORPORATIVO", "CORPORATE", "CORPORATIVE"].includes(normalized)) return "CORPORATIVE";
+  return "PERSONAL";
+}, z.enum(["PERSONAL", "CORPORATIVE"]));
+
+const typeIdentificationSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().toUpperCase();
+  if (["RNC", "REGISTRO"].includes(normalized)) return "RNC";
+  return "DNI";
+}, z.enum(["DNI", "RNC"]));
+
 const operationContainerSchema = z.object({
   number: z.string().trim().min(1).optional().nullable(),
   type: z.string().trim().min(1),
@@ -8,6 +29,34 @@ const operationContainerSchema = z.object({
   freeDays: z.number().int().min(0).optional(),
   returnLimit: z.string().datetime().optional().nullable(),
   status: z.string().trim().min(1).optional(),
+});
+
+const operationDocumentSchema = z.object({
+  name: z.string().trim().min(2),
+  type: z.string().trim().min(1),
+  status: z.string().trim().min(1).optional(),
+  owner: z.string().trim().optional().nullable(),
+  url: z.string().url().optional().nullable(),
+});
+
+const operationCustomsFileSchema = z.object({
+  declarationNo: z.string().trim().optional().nullable(),
+  regime: z.string().trim().optional().nullable(),
+  channel: z.string().trim().optional().nullable(),
+  status: z.string().trim().optional(),
+  responsible: z.string().trim().optional().nullable(),
+  submittedAt: z.string().datetime().optional().nullable(),
+  releasedAt: z.string().datetime().optional().nullable(),
+});
+
+const operationIncidentSchema = z.object({
+  type: z.string().trim().min(2),
+  severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+  status: z.enum(["OPEN", "IN_PROGRESS", "BLOCKED", "RESOLVED", "CANCELLED"]).optional(),
+  owner: z.string().trim().optional().nullable(),
+  description: z.string().trim().optional().nullable(),
+  dueAt: z.string().datetime().optional().nullable(),
+  resolvedAt: z.string().datetime().optional().nullable(),
 });
 
 export const operationSchema = z.object({
@@ -41,9 +90,13 @@ export const operationSchema = z.object({
   eta: z.string().datetime().optional().nullable(),
   progress: z.number().int().min(0).max(100).optional(),
   container: operationContainerSchema.optional().nullable(),
+  containers: z.array(operationContainerSchema).optional(),
+  documents: z.array(operationDocumentSchema).optional(),
+  customsFile: operationCustomsFileSchema.optional().nullable(),
+  incidents: z.array(operationIncidentSchema).optional(),
 });
 
-export const operationPatchSchema = operationSchema.omit({ container: true }).partial();
+export const operationPatchSchema = operationSchema.omit({ container: true, containers: true, documents: true, customsFile: true, incidents: true }).partial();
 
 export const statusSchema = z.object({
   status: operationSchema.shape.status.unwrap(),
@@ -106,6 +159,7 @@ export const documentSchema = z.object({
 
 export const attachmentSchema = z.object({
   operationId: z.string().min(1),
+  documentId: z.string().min(1).optional().nullable(),
   fileName: z.string().min(1),
   fileUrl: z.string().url(),
   fileType: z.string().optional().nullable(),
@@ -118,3 +172,23 @@ export const patchSchemas = {
   documents: documentSchema.partial().omit({ operationId: true }),
   attachments: attachmentSchema.partial().omit({ operationId: true }),
 };
+
+export const importadexClientRegisterSchema = z.object({
+  type: typeClientSchema,
+  name: z.string().trim().min(2),
+  lastName: z.string().trim().optional().nullable(),
+  adress: z.string().trim().min(2),
+  typeIdentification: typeIdentificationSchema,
+  identification: z.string().trim().min(3),
+  gender: z.string().trim().optional().nullable(),
+  birthDate: z.string().trim().optional().nullable(),
+  phoneHomeOffice: z.string().trim().min(3),
+  phonePersonal: z.string().trim().optional().nullable(),
+  email: z.string().trim().email().transform((email) => email.toLowerCase()),
+  feedBack: z.string().trim().optional().nullable(),
+  hasDgaToken: formBoolean,
+});
+
+export const importadexClientReviewSchema = z.object({
+  feedBack: z.string().trim().optional().nullable(),
+});
