@@ -19,10 +19,12 @@ router.get("/operations/:id/attachments", importadex_controller_1.importadexCont
 router.post("/operations/:id/attachments", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
 router.post("/attachments/upload", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
 router.post("/clients/register", processFiles_1.processFile, importadex_client_controller_1.importadexClientController.register);
+router.get("/clients/select", importadex_client_controller_1.importadexClientController.listApprovedOptions);
 router.get("/clients", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.list);
 router.get("/clients/:id", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.get);
 router.patch("/clients/:id/approve", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.approve);
 router.patch("/clients/:id/reject", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.reject);
+router.post("/clients/:id/commitment", importadexAdmin_1.requireImportadexAdmin, processFiles_1.processFile, importadex_client_controller_1.importadexClientController.uploadCommitment);
 for (const key of ["containers", "customs-files", "incidents", "documents", "attachments"]) {
     const handlers = importadex_controller_1.importadexController.tableHandlers(key);
     router.get(`/${key}`, handlers.list);
@@ -32,6 +34,7 @@ for (const key of ["containers", "customs-files", "incidents", "documents", "att
 router.get("/shipments", (_req, res) => res.json({ ok: true, data: [] }));
 router.get("/cargo-items", (_req, res) => res.json({ ok: true, data: [] }));
 router.get("/catalogs", importadex_controller_1.importadexController.catalogs);
+router.post("/catalog-options", importadex_controller_1.importadexController.createCatalogOption);
 router.get("/dashboard", importadex_controller_1.importadexController.dashboard);
 router.get("/reports", importadex_controller_1.importadexController.reports);
 exports.default = router;

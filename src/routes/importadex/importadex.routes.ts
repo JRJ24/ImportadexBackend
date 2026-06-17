@@ -20,10 +20,12 @@ router.post("/operations/:id/attachments", processFile, importadexController.upl
 router.post("/attachments/upload", processFile, importadexController.uploadOperationAttachments);
 
 router.post("/clients/register", processFile, importadexClientController.register);
+router.get("/clients/select", importadexClientController.listApprovedOptions);
 router.get("/clients", requireImportadexAdmin, importadexClientController.list);
 router.get("/clients/:id", requireImportadexAdmin, importadexClientController.get);
 router.patch("/clients/:id/approve", requireImportadexAdmin, importadexClientController.approve);
 router.patch("/clients/:id/reject", requireImportadexAdmin, importadexClientController.reject);
+router.post("/clients/:id/commitment", requireImportadexAdmin, processFile, importadexClientController.uploadCommitment);
 
 for (const key of ["containers", "customs-files", "incidents", "documents", "attachments"] as const) {
   const handlers = importadexController.tableHandlers(key);
@@ -35,6 +37,7 @@ for (const key of ["containers", "customs-files", "incidents", "documents", "att
 router.get("/shipments", (_req, res) => res.json({ ok: true, data: [] }));
 router.get("/cargo-items", (_req, res) => res.json({ ok: true, data: [] }));
 router.get("/catalogs", importadexController.catalogs);
+router.post("/catalog-options", importadexController.createCatalogOption);
 router.get("/dashboard", importadexController.dashboard);
 router.get("/reports", importadexController.reports);
 

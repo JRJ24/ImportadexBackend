@@ -4,6 +4,7 @@ import { ImportadexServiceError, importadexService, type TableKey } from "../../
 import type { UploadedFile } from "../../middlewares/processFiles";
 import {
   attachmentSchema,
+  importadexCatalogOptionSchema,
   commentSchema,
   containerSchema,
   customsFileSchema,
@@ -74,6 +75,7 @@ export const importadexController = {
       const data = await importadexService.createOperation(parse(operationSchema, req.body));
       ok(res, data, 201);
     } catch (error) {
+      if (handleServiceError(res, error)) return;
       next(error);
     }
   },
@@ -222,6 +224,16 @@ export const importadexController = {
     try {
       ok(res, await importadexService.catalogs());
     } catch (error) {
+      next(error);
+    }
+  },
+
+  async createCatalogOption(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await importadexService.createCatalogOption(importadexCatalogOptionSchema.parse(req.body));
+      ok(res, data, 201);
+    } catch (error) {
+      if (handleServiceError(res, error)) return;
       next(error);
     }
   },

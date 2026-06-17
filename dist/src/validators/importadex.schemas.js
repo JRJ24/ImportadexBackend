@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importadexClientReviewSchema = exports.importadexClientRegisterSchema = exports.patchSchemas = exports.attachmentSchema = exports.documentSchema = exports.incidentSchema = exports.customsFileSchema = exports.containerSchema = exports.commentSchema = exports.eventSchema = exports.statusSchema = exports.operationPatchSchema = exports.operationSchema = void 0;
+exports.importadexCatalogOptionSchema = exports.importadexClientReviewSchema = exports.importadexClientRegisterSchema = exports.patchSchemas = exports.attachmentSchema = exports.documentSchema = exports.incidentSchema = exports.customsFileSchema = exports.containerSchema = exports.commentSchema = exports.eventSchema = exports.statusSchema = exports.operationPatchSchema = exports.operationSchema = void 0;
 const zod_1 = require("zod");
 const formBoolean = zod_1.z.preprocess((value) => {
     if (typeof value === "boolean")
@@ -179,4 +179,8 @@ exports.importadexClientRegisterSchema = zod_1.z.object({
 });
 exports.importadexClientReviewSchema = zod_1.z.object({
     feedBack: zod_1.z.string().trim().optional().nullable(),
+});
+exports.importadexCatalogOptionSchema = zod_1.z.object({
+    group: zod_1.z.enum(["origin", "destination", "port_airport", "carrier", "customs_status", "document_type"]),
+    label: zod_1.z.string().trim().min(2),
 });

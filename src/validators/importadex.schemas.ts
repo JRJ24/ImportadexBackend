@@ -192,3 +192,8 @@ export const importadexClientRegisterSchema = z.object({
 export const importadexClientReviewSchema = z.object({
   feedBack: z.string().trim().optional().nullable(),
 });
+
+export const importadexCatalogOptionSchema = z.object({
+  group: z.enum(["origin", "destination", "port_airport", "carrier", "customs_status", "document_type"]),
+  label: z.string().trim().min(2),
+});
