@@ -275,6 +275,8 @@ model ImportadexClient {
   email              String                       @unique
   emailHash          String?                      @unique @map("email_hash")
   feedBack           String?                      @map("feedBack")
+  commitmentDocumentUrl  String?                  @map("commitment_document_url")
+  commitmentDocumentName String?                  @map("commitment_document_name")
   active             Boolean                      @default(true)
   reviewStatus       String                       @default("PENDING") @map("review_status")
   reviewedAt         DateTime?                    @map("reviewed_at")

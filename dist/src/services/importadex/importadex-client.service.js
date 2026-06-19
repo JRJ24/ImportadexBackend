@@ -67,6 +67,8 @@ const mapClient = (row) => ({
     phonePersonal: stringValue(row.phone_personal) || null,
     email: safeDecrypt(stringValue(row.email)),
     feedBack: stringValue(row.feedBack ?? row.feedback) || null,
+    commitmentDocumentUrl: stringValue(row.commitment_document_url) || null,
+    commitmentDocumentName: stringValue(row.commitment_document_name) || null,
     active: Boolean(row.active),
     reviewStatus: stringValue(row.review_status) || "PENDING",
     reviewedAt: row.reviewed_at ?? null,
@@ -154,6 +156,31 @@ exports.importadexClientService = {
        ORDER BY c.created_at DESC`);
         return rows.map(mapClient);
     },
+    async listApprovedClientOptions(q) {
+        const search = q?.trim();
+        const values = [];
+        const clauses = [`c.active = true`, `c.review_status = 'APPROVED'`];
+        if (search) {
+            values.push(`%${search}%`);
+            clauses.push(`(c.name ILIKE $${values.length} OR c.last_name ILIKE $${values.length} OR c.identification ILIKE $${values.length})`);
+        }
+        const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT c.*,
+        (SELECT row_to_json(t.*) FROM "importadex_token_DGA" t WHERE t."clientImportadex" = c.id) AS importadex_token_dga
+       FROM importadex_clients c
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY c.name ASC, c.last_name ASC
+       LIMIT 50`, ...values);
+        return rows.map((row) => {
+            const client = mapClient(row);
+            const label = `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`;
+            return {
+                id: client.id,
+                label,
+                email: client.email,
+                identification: client.identification,
+            };
+        });
+    },
     async getClient(id) {
         return findClientById(id);
     },
@@ -169,6 +196,23 @@ exports.importadexClientService = {
         if (!rows[0])
             return null;
         await auditClient("REVIEW", id, { status, feedBack: nullable(feedBack), reviewedBy });
+        return findClientById(id);
+    },
+    async uploadCommitmentDocument(id, file) {
+        if (!file) {
+            throw new ImportadexClientServiceError(400, "El documento de compromiso es requerido");
+        }
+        const rows = await connectionDB_1.prisma.$queryRawUnsafe(`UPDATE importadex_clients
+       SET commitment_document_url = $2,
+           commitment_document_name = $3
+       WHERE id = $1
+       RETURNING *`, id, file.url, file.originalName || file.fileName);
+        if (!rows[0])
+            return null;
+        await auditClient("UPLOAD_COMMITMENT_DOCUMENT", id, {
+            fileName: file.originalName || file.fileName,
+            fileUrl: file.url,
+        });
         return findClientById(id);
     },
 };

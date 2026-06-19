@@ -51,6 +51,8 @@ exports.importadexController = {
             ok(res, data, 201);
         }
         catch (error) {
+            if (handleServiceError(res, error))
+                return;
             next(error);
         }
     },
@@ -197,6 +199,17 @@ exports.importadexController = {
             ok(res, await importadex_service_1.importadexService.catalogs());
         }
         catch (error) {
+            next(error);
+        }
+    },
+    async createCatalogOption(req, res, next) {
+        try {
+            const data = await importadex_service_1.importadexService.createCatalogOption(importadex_schemas_1.importadexCatalogOptionSchema.parse(req.body));
+            ok(res, data, 201);
+        }
+        catch (error) {
+            if (handleServiceError(res, error))
+                return;
             next(error);
         }
     },

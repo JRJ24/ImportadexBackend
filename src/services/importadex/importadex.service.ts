@@ -11,6 +11,14 @@ export type TableKey =
   | "documents"
   | "attachments";
 
+export type CatalogOptionGroup =
+  | "origin"
+  | "destination"
+  | "port_airport"
+  | "carrier"
+  | "customs_status"
+  | "document_type";
+
 export class ImportadexServiceError extends Error {
   constructor(
     public status: number,
@@ -82,6 +90,31 @@ const operationColumns = [
   "updated_at",
 ];
 
+const catalogOptionGroups = new Set<CatalogOptionGroup>([
+  "origin",
+  "destination",
+  "port_airport",
+  "carrier",
+  "customs_status",
+  "document_type",
+]);
+
+function normalizeCatalogValue(label: string) {
+  return label
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+}
+
+function assertCatalogOptionGroup(group: string): asserts group is CatalogOptionGroup {
+  if (!catalogOptionGroups.has(group as CatalogOptionGroup)) {
+    throw new ImportadexServiceError(400, "Grupo de catalogo no soportado");
+  }
+}
+
 function toColumn(key: string) {
   return columnMap[key] ?? key;
 }
@@ -121,6 +154,64 @@ async function audit(
     operationId,
     JSON.stringify(changes ?? {}),
   );
+}
+
+async function upsertCatalogOption(
+  group: CatalogOptionGroup,
+  label: unknown,
+  db: DbClient = prisma,
+) {
+  if (typeof label !== "string") return null;
+  const cleanLabel = label.trim();
+  if (!cleanLabel) return null;
+
+  const value = normalizeCatalogValue(cleanLabel);
+  const rows = await db.$queryRawUnsafe<{ group: string; value: string; label: string }[]>(
+    `INSERT INTO importadex_catalogs (id, "group", value, label, active)
+     VALUES ($1, $2, $3, $4, true)
+     ON CONFLICT ("group", value) DO UPDATE SET label = EXCLUDED.label, active = true
+     RETURNING "group", value, label`,
+    randomUUID(),
+    group,
+    value,
+    cleanLabel,
+  );
+
+  if (group === "carrier") {
+    await db.$executeRawUnsafe(
+      `INSERT INTO importadex_carriers (id, name, active)
+       VALUES ($1, $2, true)
+       ON CONFLICT (name) DO UPDATE SET active = true`,
+      randomUUID(),
+      cleanLabel,
+    );
+  }
+
+  return rows[0] ?? { group, value, label: cleanLabel };
+}
+
+async function ensureApprovedClient(clientName: unknown) {
+  const cleanClientName = typeof clientName === "string" ? clientName.trim() : "";
+  if (!cleanClientName) {
+    throw new ImportadexServiceError(400, "Selecciona un cliente aprobado");
+  }
+
+  const rows = await prisma.$queryRawUnsafe<{ id: string }[]>(
+    `SELECT id
+     FROM importadex_clients
+     WHERE active = true
+       AND review_status = 'APPROVED'
+       AND (
+         name = $1 OR
+         CONCAT(name, CASE WHEN last_name IS NULL OR BTRIM(last_name) = '' THEN '' ELSE CONCAT(' ', last_name) END) = $1
+       )
+     LIMIT 1`,
+    cleanClientName,
+  );
+
+  if (!rows[0]) {
+    throw new ImportadexServiceError(400, "La operacion requiere un cliente aprobado");
+  }
 }
 
 async function insert(table: string, payload: Record<string, unknown>, db: DbClient = prisma) {
@@ -289,11 +380,18 @@ export const importadexService = {
 
   async createOperation(payload: Record<string, unknown>) {
     const { container, containers, documents, customsFile, incidents, ...operationPayload } = payload;
+    await ensureApprovedClient(operationPayload.clientName);
     const code =
       operationPayload.code ??
       `IMPX-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
 
     const operationId = await prisma.$transaction(async (tx) => {
+      await upsertCatalogOption("origin", operationPayload.origin, tx);
+      await upsertCatalogOption("destination", operationPayload.destination, tx);
+      await upsertCatalogOption("port_airport", operationPayload.port, tx);
+      await upsertCatalogOption("carrier", operationPayload.carrier, tx);
+      await upsertCatalogOption("customs_status", operationPayload.customsStatus, tx);
+
       const operation = await insert("importadex_operations", {
         ...operationPayload,
         code,
@@ -327,6 +425,7 @@ export const importadexService = {
       const initialDocuments = asRecordArray(documents);
       const documentRows = initialDocuments.length ? initialDocuments : buildDefaultDocuments(operationPayload);
       for (const document of documentRows) {
+        await upsertCatalogOption("document_type", document.name, tx);
         await insert("importadex_documents", {
           operationId: createdOperationId,
           name: document.name,
@@ -431,6 +530,7 @@ export const importadexService = {
     const itemOperationId = (item as { operation_id?: string }).operation_id ?? operationId;
 
     if (key === "documents" && itemOperationId) {
+      await upsertCatalogOption("document_type", (item as { name?: string }).name);
       await recalculateDocumentProgress(itemOperationId);
       await insert("importadex_events", {
         operationId: itemOperationId,
@@ -605,8 +705,29 @@ export const importadexService = {
 
   async catalogs() {
     return prisma.$queryRawUnsafe<unknown[]>(
-      'SELECT "group", value, label FROM importadex_catalogs WHERE active = true ORDER BY "group", label',
+      `WITH option_rows AS (
+        SELECT "group", value, label FROM importadex_catalogs WHERE active = true
+        UNION SELECT 'origin' AS "group", origin AS value, origin AS label FROM importadex_operations WHERE origin IS NOT NULL AND BTRIM(origin) <> ''
+        UNION SELECT 'destination' AS "group", destination AS value, destination AS label FROM importadex_operations WHERE destination IS NOT NULL AND BTRIM(destination) <> ''
+        UNION SELECT 'port_airport' AS "group", port AS value, port AS label FROM importadex_operations WHERE port IS NOT NULL AND BTRIM(port) <> ''
+        UNION SELECT 'port_airport' AS "group", name AS value, name AS label FROM importadex_ports WHERE active = true AND BTRIM(name) <> ''
+        UNION SELECT 'port_airport' AS "group", code AS value, CONCAT(code, ' - ', name) AS label FROM importadex_airports WHERE active = true AND BTRIM(code) <> ''
+        UNION SELECT 'carrier' AS "group", carrier AS value, carrier AS label FROM importadex_operations WHERE carrier IS NOT NULL AND BTRIM(carrier) <> ''
+        UNION SELECT 'carrier' AS "group", carrier AS value, carrier AS label FROM importadex_containers WHERE carrier IS NOT NULL AND BTRIM(carrier) <> ''
+        UNION SELECT 'carrier' AS "group", name AS value, name AS label FROM importadex_carriers WHERE active = true AND BTRIM(name) <> ''
+        UNION SELECT 'customs_status' AS "group", customs_status AS value, customs_status AS label FROM importadex_operations WHERE customs_status IS NOT NULL AND BTRIM(customs_status) <> ''
+        UNION SELECT 'customs_status' AS "group", status AS value, status AS label FROM importadex_customs_files WHERE status IS NOT NULL AND BTRIM(status) <> ''
+        UNION SELECT 'document_type' AS "group", name AS value, name AS label FROM importadex_documents WHERE name IS NOT NULL AND BTRIM(name) <> ''
+      )
+      SELECT DISTINCT ON ("group", LOWER(label)) "group", value, label
+      FROM option_rows
+      ORDER BY "group", LOWER(label), label`,
     );
+  },
+
+  async createCatalogOption(payload: { group: string; label: string }) {
+    assertCatalogOptionGroup(payload.group);
+    return upsertCatalogOption(payload.group, payload.label);
   },
 
   async dashboard() {

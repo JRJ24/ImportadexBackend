@@ -50,6 +50,14 @@ export const importadexClientController = {
     }
   },
 
+  async listApprovedOptions(req: Request, res: Response, next: NextFunction) {
+    try {
+      ok(res, await importadexClientService.listApprovedClientOptions(req.query.q?.toString()));
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async get(req: Request<{ id: string }>, res: Response, next: NextFunction) {
     try {
       const client = await importadexClientService.getClient(req.params.id);
@@ -83,6 +91,20 @@ export const importadexClientController = {
     try {
       const payload = importadexClientReviewSchema.parse(req.body);
       const client = await importadexClientService.reviewClient(req.params.id, "REJECTED", payload.feedBack);
+      if (!client) {
+        res.status(404).json({ ok: false, message: "Cliente no encontrado" });
+        return;
+      }
+
+      ok(res, client);
+    } catch (error) {
+      if (!handleError(res, error)) next(error);
+    }
+  },
+
+  async uploadCommitment(req: Request<{ id: string }>, res: Response, next: NextFunction) {
+    try {
+      const client = await importadexClientService.uploadCommitmentDocument(req.params.id, getUploadedFiles(req)[0]);
       if (!client) {
         res.status(404).json({ ok: false, message: "Cliente no encontrado" });
         return;
