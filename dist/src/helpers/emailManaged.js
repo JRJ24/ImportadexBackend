@@ -18,6 +18,7 @@ const splitRecipients = (value) => (value ?? "")
     .split(/[;,]/)
     .map((item) => item.trim())
     .filter(Boolean);
+const uniqueRecipients = (...recipientGroups) => Array.from(new Set(recipientGroups.flat().map((recipient) => recipient.trim()).filter(Boolean)));
 const escapeHtml = (value) => value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -54,6 +55,8 @@ async function sendImportadexClientRegistrationEmails(payload) {
         return { sent: false, skipped: true };
     }
     const adminRecipients = splitRecipients(process.env.IMPORTADEX_ADMIN_EMAILS || process.env.IMPORTADEX_NOTIFY_EMAILS);
+    const operatorRecipients = splitRecipients(process.env.IMPORTADEX_OPERATOR_EMAILS || process.env.IMPORTADEX_OPERATIONS_EMAILS);
+    const internalRecipients = uniqueRecipients(adminRecipients, operatorRecipients);
     const messages = [
         transporter.sendMail({
             from: process.env.EMAIL_FROM || process.env.EMAILUSER,
@@ -62,10 +65,10 @@ async function sendImportadexClientRegistrationEmails(payload) {
             html: buildClientHtml(payload),
         }),
     ];
-    if (adminRecipients.length) {
+    if (internalRecipients.length) {
         messages.push(transporter.sendMail({
             from: process.env.EMAIL_FROM || process.env.EMAILUSER,
-            to: adminRecipients,
+            to: internalRecipients,
             subject: "Nuevo cliente Importadex registrado",
             html: buildAdminHtml(payload),
         }));
@@ -78,5 +81,7 @@ async function sendImportadexClientRegistrationEmails(payload) {
     return {
         sent: rejected.length === 0,
         adminRecipients: adminRecipients.length,
+        operatorRecipients: operatorRecipients.length,
+        internalRecipients: internalRecipients.length,
     };
 }
