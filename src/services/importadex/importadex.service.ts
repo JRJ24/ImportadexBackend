@@ -45,6 +45,7 @@ const tablesWithUpdatedAt = new Set<TableKey>([
 
 const columnMap: Record<string, string> = {
   operationId: "operation_id",
+  clientId: "client_id",
   clientName: "client_name",
   operationType: "operation_type",
   transportMode: "transport_mode",
@@ -71,6 +72,7 @@ const columnMap: Record<string, string> = {
 const operationColumns = [
   "id",
   "code",
+  "client_id",
   "client_name",
   "operation_type",
   "transport_mode",
@@ -190,14 +192,18 @@ async function upsertCatalogOption(
   return rows[0] ?? { group, value, label: cleanLabel };
 }
 
-async function ensureApprovedClient(clientName: unknown) {
+function formatClientDisplayName(row: { name: string; last_name?: string | null }) {
+  return `${row.name}${row.last_name ? ` ${row.last_name}` : ""}`;
+}
+
+async function resolveApprovedClient(clientName: unknown) {
   const cleanClientName = typeof clientName === "string" ? clientName.trim() : "";
   if (!cleanClientName) {
     throw new ImportadexServiceError(400, "Selecciona un cliente aprobado");
   }
 
-  const rows = await prisma.$queryRawUnsafe<{ id: string }[]>(
-    `SELECT id
+  const rows = await prisma.$queryRawUnsafe<{ id: string; name: string; last_name: string | null }[]>(
+    `SELECT id, name, last_name
      FROM importadex_clients
      WHERE active = true
        AND review_status = 'APPROVED'
@@ -212,6 +218,11 @@ async function ensureApprovedClient(clientName: unknown) {
   if (!rows[0]) {
     throw new ImportadexServiceError(400, "La operacion requiere un cliente aprobado");
   }
+
+  return {
+    id: rows[0].id,
+    displayName: formatClientDisplayName(rows[0]),
+  };
 }
 
 async function insert(table: string, payload: Record<string, unknown>, db: DbClient = prisma) {
@@ -380,7 +391,9 @@ export const importadexService = {
 
   async createOperation(payload: Record<string, unknown>) {
     const { container, containers, documents, customsFile, incidents, ...operationPayload } = payload;
-    await ensureApprovedClient(operationPayload.clientName);
+    const client = await resolveApprovedClient(operationPayload.clientName);
+    operationPayload.clientId = client.id;
+    operationPayload.clientName = client.displayName;
     const code =
       operationPayload.code ??
       `IMPX-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
@@ -491,8 +504,15 @@ export const importadexService = {
   },
 
   async updateOperation(id: string, payload: Record<string, unknown>) {
-    const operation = await patch("importadex_operations", id, payload);
-    await audit("UPDATE", "operation", id, id, payload);
+    const nextPayload = { ...payload };
+    if (typeof nextPayload.clientName === "string") {
+      const client = await resolveApprovedClient(nextPayload.clientName);
+      nextPayload.clientId = client.id;
+      nextPayload.clientName = client.displayName;
+    }
+
+    const operation = await patch("importadex_operations", id, nextPayload);
+    await audit("UPDATE", "operation", id, id, nextPayload);
     return operation;
   },
 
@@ -537,6 +557,20 @@ export const importadexService = {
         event: `Documento creado: ${(item as { name?: string }).name ?? "Documento"}`,
         owner: "system",
         location: (item as { status?: string }).status ?? "PENDING",
+      });
+    }
+
+    if (key === "customs-files" && itemOperationId) {
+      const status = (item as { status?: string }).status;
+      if (status) {
+        await upsertCatalogOption("customs_status", status);
+        await patch("importadex_operations", itemOperationId, { customsStatus: status });
+      }
+      await insert("importadex_events", {
+        operationId: itemOperationId,
+        event: `Expediente aduanal creado: ${status ?? "Sin estado"}`,
+        owner: (item as { responsible?: string }).responsible ?? "Aduanas",
+        location: (item as { declaration_no?: string }).declaration_no ?? null,
       });
     }
 
@@ -637,6 +671,20 @@ export const importadexService = {
         event: `Documento actualizado: ${(item as { name?: string }).name ?? "Documento"}`,
         owner: "system",
         location: (item as { status?: string }).status ?? null,
+      });
+    }
+
+    if (key === "customs-files" && operationId) {
+      const status = (item as { status?: string }).status;
+      if (status) {
+        await upsertCatalogOption("customs_status", status);
+        await patch("importadex_operations", operationId, { customsStatus: status });
+      }
+      await insert("importadex_events", {
+        operationId,
+        event: `Expediente aduanal actualizado: ${status ?? "Sin estado"}`,
+        owner: (item as { responsible?: string }).responsible ?? "Aduanas",
+        location: (item as { declaration_no?: string }).declaration_no ?? null,
       });
     }
 

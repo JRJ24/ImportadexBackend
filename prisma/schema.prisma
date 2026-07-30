@@ -77,7 +77,9 @@ enum ImportadexSeverity {
 model ImportadexOperation {
   id            String                    @id @default(cuid())
   code          String                    @unique @map("code")
+  clientId      String?                   @map("client_id")
   clientName    String                    @map("client_name")
+  client        ImportadexClient?         @relation(fields: [clientId], references: [id])
   operationType ImportadexOperationType   @map("operation_type")
   transportMode ImportadexTransportMode   @map("transport_mode")
   cargoType     ImportadexCargoType       @map("cargo_type")
@@ -106,6 +108,7 @@ model ImportadexOperation {
   attachments   ImportadexAttachment[]
   auditLogs     ImportadexAuditLog[]
 
+  @@index([clientId], map: "importadex_operations_client_id_idx")
   @@map("importadex_operations")
 }
 
@@ -283,6 +286,7 @@ model ImportadexClient {
   reviewedBy         String?                      @map("reviewed_by")
   createdAt          DateTime                     @default(now()) @map("created_at")
   importadexTokenDGA ImportadexTokenDGA?
+  operations         ImportadexOperation[]
 
   @@map("importadex_clients")
 }

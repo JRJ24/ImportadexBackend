@@ -26,6 +26,7 @@ const tablesWithUpdatedAt = new Set([
 ]);
 const columnMap = {
     operationId: "operation_id",
+    clientId: "client_id",
     clientName: "client_name",
     operationType: "operation_type",
     transportMode: "transport_mode",
@@ -51,6 +52,7 @@ const columnMap = {
 const operationColumns = [
     "id",
     "code",
+    "client_id",
     "client_name",
     "operation_type",
     "transport_mode",
@@ -129,12 +131,15 @@ async function upsertCatalogOption(group, label, db = connectionDB_1.prisma) {
     }
     return rows[0] ?? { group, value, label: cleanLabel };
 }
-async function ensureApprovedClient(clientName) {
+function formatClientDisplayName(row) {
+    return `${row.name}${row.last_name ? ` ${row.last_name}` : ""}`;
+}
+async function resolveApprovedClient(clientName) {
     const cleanClientName = typeof clientName === "string" ? clientName.trim() : "";
     if (!cleanClientName) {
         throw new ImportadexServiceError(400, "Selecciona un cliente aprobado");
     }
-    const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT id
+    const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT id, name, last_name
      FROM importadex_clients
      WHERE active = true
        AND review_status = 'APPROVED'
@@ -146,6 +151,10 @@ async function ensureApprovedClient(clientName) {
     if (!rows[0]) {
         throw new ImportadexServiceError(400, "La operacion requiere un cliente aprobado");
     }
+    return {
+        id: rows[0].id,
+        displayName: formatClientDisplayName(rows[0]),
+    };
 }
 async function insert(table, payload, db = connectionDB_1.prisma) {
     const id = (0, crypto_1.randomUUID)();
@@ -269,7 +278,9 @@ exports.importadexService = {
     },
     async createOperation(payload) {
         const { container, containers, documents, customsFile, incidents, ...operationPayload } = payload;
-        await ensureApprovedClient(operationPayload.clientName);
+        const client = await resolveApprovedClient(operationPayload.clientName);
+        operationPayload.clientId = client.id;
+        operationPayload.clientName = client.displayName;
         const code = operationPayload.code ??
             `IMPX-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
         const operationId = await connectionDB_1.prisma.$transaction(async (tx) => {
@@ -367,8 +378,14 @@ exports.importadexService = {
         return this.getOperation(operationId);
     },
     async updateOperation(id, payload) {
-        const operation = await patch("importadex_operations", id, payload);
-        await audit("UPDATE", "operation", id, id, payload);
+        const nextPayload = { ...payload };
+        if (typeof nextPayload.clientName === "string") {
+            const client = await resolveApprovedClient(nextPayload.clientName);
+            nextPayload.clientId = client.id;
+            nextPayload.clientName = client.displayName;
+        }
+        const operation = await patch("importadex_operations", id, nextPayload);
+        await audit("UPDATE", "operation", id, id, nextPayload);
         return operation;
     },
     async updateStatus(id, status, note) {
@@ -402,6 +419,19 @@ exports.importadexService = {
                 event: `Documento creado: ${item.name ?? "Documento"}`,
                 owner: "system",
                 location: item.status ?? "PENDING",
+            });
+        }
+        if (key === "customs-files" && itemOperationId) {
+            const status = item.status;
+            if (status) {
+                await upsertCatalogOption("customs_status", status);
+                await patch("importadex_operations", itemOperationId, { customsStatus: status });
+            }
+            await insert("importadex_events", {
+                operationId: itemOperationId,
+                event: `Expediente aduanal creado: ${status ?? "Sin estado"}`,
+                owner: item.responsible ?? "Aduanas",
+                location: item.declaration_no ?? null,
             });
         }
         if (key === "incidents" && itemOperationId) {
@@ -467,6 +497,19 @@ exports.importadexService = {
                 event: `Documento actualizado: ${item.name ?? "Documento"}`,
                 owner: "system",
                 location: item.status ?? null,
+            });
+        }
+        if (key === "customs-files" && operationId) {
+            const status = item.status;
+            if (status) {
+                await upsertCatalogOption("customs_status", status);
+                await patch("importadex_operations", operationId, { customsStatus: status });
+            }
+            await insert("importadex_events", {
+                operationId,
+                event: `Expediente aduanal actualizado: ${status ?? "Sin estado"}`,
+                owner: item.responsible ?? "Aduanas",
+                location: item.declaration_no ?? null,
             });
         }
         if (key === "incidents" && operationId) {
