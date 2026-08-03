@@ -150,6 +150,7 @@ exports.importadexClientService = {
             throw new ImportadexClientServiceError(500, "No se pudo registrar el cliente");
         }
         const notification = await (0, emailManaged_1.sendImportadexClientRegistrationEmails)({
+            clientId: client.id,
             clientName: `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`,
             clientEmail: client.email,
             clientType: client.type,
@@ -201,6 +202,7 @@ exports.importadexClientService = {
             throw new ImportadexClientServiceError(500, "No se pudo crear el cliente");
         }
         const commitmentNotification = await (0, emailManaged_1.sendImportadexClientCommitmentEmail)({
+            clientId: client.id,
             clientName: clientDisplayName(client),
             clientEmail: client.email,
             documentName: commitmentFile.originalName || commitmentFile.fileName,
@@ -289,6 +291,7 @@ exports.importadexClientService = {
         const client = await findClientById(id);
         if (client) {
             await (0, emailManaged_1.sendImportadexClientCommitmentEmail)({
+                clientId: client.id,
                 clientName: clientDisplayName(client),
                 clientEmail: client.email,
                 documentName: file.originalName || file.fileName,

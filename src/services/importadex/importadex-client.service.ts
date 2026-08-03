@@ -270,6 +270,7 @@ export const importadexClientService = {
     }
 
     const notification = await sendImportadexClientRegistrationEmails({
+      clientId: client.id,
       clientName: `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`,
       clientEmail: client.email,
       clientType: client.type,
@@ -365,6 +366,7 @@ export const importadexClientService = {
     }
 
     const commitmentNotification = await sendImportadexClientCommitmentEmail({
+      clientId: client.id,
       clientName: clientDisplayName(client),
       clientEmail: client.email,
       documentName: commitmentFile.originalName || commitmentFile.fileName,
@@ -486,6 +488,7 @@ export const importadexClientService = {
     const client = await findClientById(id);
     if (client) {
       await sendImportadexClientCommitmentEmail({
+        clientId: client.id,
         clientName: clientDisplayName(client),
         clientEmail: client.email,
         documentName: file.originalName || file.fileName,

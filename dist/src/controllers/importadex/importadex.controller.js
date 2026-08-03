@@ -229,4 +229,29 @@ exports.importadexController = {
             next(error);
         }
     },
+    async emailLogs(req, res, next) {
+        try {
+            ok(res, await importadex_service_1.importadexService.listEmailLogs(req.query.limit));
+        }
+        catch (error) {
+            next(error);
+        }
+    },
+    async emailTest(req, res, next) {
+        try {
+            const body = importadex_schemas_1.importadexEmailTestSchema.parse(req.body);
+            ok(res, await importadex_service_1.importadexService.sendEmailTest(body.to, req.importadexUser), 201);
+        }
+        catch (error) {
+            next(error);
+        }
+    },
+    async emailHealth(_req, res, next) {
+        try {
+            ok(res, await importadex_service_1.importadexService.emailHealth());
+        }
+        catch (error) {
+            next(error);
+        }
+    },
 };

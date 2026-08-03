@@ -197,3 +197,7 @@ export const importadexCatalogOptionSchema = z.object({
   group: z.enum(["origin", "destination", "port_airport", "carrier", "customs_status", "document_type"]),
   label: z.string().trim().min(2),
 });
+
+export const importadexEmailTestSchema = z.object({
+  to: z.string().trim().email().transform((email) => email.toLowerCase()),
+});

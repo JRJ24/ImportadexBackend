@@ -136,7 +136,7 @@ function rowText(row, key) {
     return value === null || value === undefined ? null : String(value);
 }
 async function getOperationSummary(operationId) {
-    const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT id, code, client_name, status, customs_status, created_by_name
+    const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT id, code, client_id, client_name, status, customs_status, created_by_name
      FROM importadex_operations
      WHERE id = $1
      LIMIT 1`, operationId);
@@ -147,6 +147,8 @@ async function notifyOperationEvent(subject, title, summary, operationId, rows =
         return;
     const operation = await getOperationSummary(operationId);
     await (0, emailManaged_1.sendImportadexInternalNotification)({
+        operationId,
+        clientId: rowText(operation, "client_id"),
         subject,
         title,
         summary,
@@ -157,6 +159,14 @@ async function notifyOperationEvent(subject, title, summary, operationId, rows =
             { label: "Aduanas", value: rowText(operation, "customs_status") },
             ...rows,
         ],
+    });
+}
+function queueEmailTask(label, task) {
+    void task().catch((error) => {
+        console.error("Importadex email background task failed", {
+            label,
+            message: error instanceof Error ? error.message : "Email background task failed",
+        });
     });
 }
 async function upsertCatalogOption(group, label, db = connectionDB_1.prisma) {
@@ -185,7 +195,7 @@ async function resolveApprovedClient(clientName) {
     if (!cleanClientName) {
         throw new ImportadexServiceError(400, "Selecciona un cliente aprobado");
     }
-    const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT id, name, last_name
+    const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT id, name, last_name, email
      FROM importadex_clients
      WHERE active = true
        AND review_status = 'APPROVED'
@@ -200,6 +210,7 @@ async function resolveApprovedClient(clientName) {
     return {
         id: rows[0].id,
         displayName: formatClientDisplayName(rows[0]),
+        email: rows[0].email,
     };
 }
 async function insert(table, payload, db = connectionDB_1.prisma) {
@@ -423,11 +434,23 @@ exports.importadexService = {
             return createdOperationId;
         });
         const operation = await this.getOperation(operationId);
-        await notifyOperationEvent("Operacion Importadex creada", "Operacion Importadex creada", "Se creo una nueva operacion en el modulo Importadex.", operationId, [
+        queueEmailTask("operation-created-internal", () => notifyOperationEvent("Operacion Importadex creada", "Operacion Importadex creada", "Se creo una nueva operacion en el modulo Importadex.", operationId, [
             { label: "Creada por", value: actorName(actor) },
             { label: "Origen", value: rowText(operation, "origin") },
             { label: "Destino", value: rowText(operation, "destination") },
-        ]);
+        ]));
+        queueEmailTask("operation-created-client", () => (0, emailManaged_1.sendImportadexClientOperationEmail)({
+            operationId,
+            clientId: client.id,
+            clientName: client.displayName,
+            clientEmail: client.email,
+            operationCode: rowText(operation, "code") ?? String(code),
+            operationType: rowText(operation, "operation_type"),
+            transportMode: rowText(operation, "transport_mode"),
+            status: rowText(operation, "status"),
+            origin: rowText(operation, "origin"),
+            destination: rowText(operation, "destination"),
+        }));
         return operation;
     },
     async updateOperation(id, payload, actor) {
@@ -451,13 +474,13 @@ exports.importadexService = {
         });
         await audit("STATUS_CHANGE", "operation", id, id, { status, note }, connectionDB_1.prisma, actorName(actor));
         const operation = await this.getOperation(id);
-        await notifyOperationEvent(status === "DELIVERED" ? "Transporte Importadex entregado" : "Avance operativo Importadex", status === "DELIVERED" ? "Transporte marcado como entregado" : "Avance operativo registrado", status === "DELIVERED"
+        queueEmailTask("operation-status-internal", () => notifyOperationEvent(status === "DELIVERED" ? "Transporte Importadex entregado" : "Avance operativo Importadex", status === "DELIVERED" ? "Transporte marcado como entregado" : "Avance operativo registrado", status === "DELIVERED"
             ? "Una operacion/transporte fue marcado como entregado en Importadex."
             : "Una operacion Importadex cambio de estado operativo.", id, [
             { label: "Nuevo estado", value: status },
             { label: "Nota", value: note },
             { label: "Usuario", value: actorName(actor) },
-        ]);
+        ]));
         return operation;
     },
     async listTable(key) {
@@ -481,11 +504,11 @@ exports.importadexService = {
                 owner: "system",
                 location: item.status ?? "PENDING",
             });
-            await notifyOperationEvent("Avance documental Importadex", "Documento creado en operacion Importadex", "Se creo un documento en el expediente documental de una operacion.", itemOperationId, [
+            queueEmailTask("document-created-internal", () => notifyOperationEvent("Avance documental Importadex", "Documento creado en operacion Importadex", "Se creo un documento en el expediente documental de una operacion.", itemOperationId, [
                 { label: "Documento", value: item.name },
                 { label: "Estado", value: item.status },
                 { label: "Usuario", value: actorName(actor) },
-            ]);
+            ]));
         }
         if (key === "customs-files" && itemOperationId) {
             const status = item.status;
@@ -499,11 +522,11 @@ exports.importadexService = {
                 owner: item.responsible ?? "Aduanas",
                 location: item.declaration_no ?? null,
             });
-            await notifyOperationEvent("Estado aduanal Importadex modificado", "Expediente aduanal creado", "Se creo o actualizo el estado aduanal de una operacion Importadex.", itemOperationId, [
+            queueEmailTask("customs-created-internal", () => notifyOperationEvent("Estado aduanal Importadex modificado", "Expediente aduanal creado", "Se creo o actualizo el estado aduanal de una operacion Importadex.", itemOperationId, [
                 { label: "Estado aduanal", value: status },
                 { label: "Responsable", value: item.responsible },
                 { label: "Usuario", value: actorName(actor) },
-            ]);
+            ]));
         }
         if (key === "incidents" && itemOperationId) {
             await insert("importadex_events", {
@@ -556,13 +579,13 @@ exports.importadexService = {
                 .join(", "),
         });
         await audit("CREATE", "attachments", null, operationId, { documentId: document?.id ?? null, attachments }, connectionDB_1.prisma, actorName(actor));
-        await notifyOperationEvent(document ? "Avance documental Importadex" : "Evidencia Importadex creada", document ? "Documento recibido con evidencia" : "Evidencia cargada en operacion", document
+        queueEmailTask("attachments-created-internal", () => notifyOperationEvent(document ? "Avance documental Importadex" : "Evidencia Importadex creada", document ? "Documento recibido con evidencia" : "Evidencia cargada en operacion", document
             ? "Se cargo una evidencia asociada a un documento de la operacion."
             : "Se cargo una nueva evidencia en la operacion Importadex.", operationId, [
             { label: "Documento", value: document?.name },
             { label: "Archivos", value: files.map((file) => file.originalName || file.fileName).join(", ") },
             { label: "Usuario", value: actorName(actor) },
-        ]);
+        ]));
         return this.getOperation(operationId);
     },
     async updateTable(key, id, payload, actor) {
@@ -576,11 +599,11 @@ exports.importadexService = {
                 owner: "system",
                 location: item.status ?? null,
             });
-            await notifyOperationEvent("Avance documental Importadex", "Documento actualizado en operacion Importadex", "Se actualizo un documento del expediente documental de una operacion.", operationId, [
+            queueEmailTask("document-updated-internal", () => notifyOperationEvent("Avance documental Importadex", "Documento actualizado en operacion Importadex", "Se actualizo un documento del expediente documental de una operacion.", operationId, [
                 { label: "Documento", value: item.name },
                 { label: "Estado", value: item.status },
                 { label: "Usuario", value: actorName(actor) },
-            ]);
+            ]));
         }
         if (key === "customs-files" && operationId) {
             const status = item.status;
@@ -594,11 +617,11 @@ exports.importadexService = {
                 owner: item.responsible ?? "Aduanas",
                 location: item.declaration_no ?? null,
             });
-            await notifyOperationEvent("Estado aduanal Importadex modificado", "Expediente aduanal actualizado", "Se modifico el estado aduanal de una operacion Importadex.", operationId, [
+            queueEmailTask("customs-updated-internal", () => notifyOperationEvent("Estado aduanal Importadex modificado", "Expediente aduanal actualizado", "Se modifico el estado aduanal de una operacion Importadex.", operationId, [
                 { label: "Estado aduanal", value: status },
                 { label: "Responsable", value: item.responsible },
                 { label: "Usuario", value: actorName(actor) },
-            ]);
+            ]));
         }
         if (key === "incidents" && operationId) {
             await insert("importadex_events", {
@@ -620,10 +643,10 @@ exports.importadexService = {
             operationId,
         });
         await audit("CREATE", "event", event.id, operationId, event, connectionDB_1.prisma, actorName(actor));
-        await notifyOperationEvent("Avance operativo Importadex", "Evento operativo registrado", "Se registro un avance operativo en la linea de tiempo de una operacion Importadex.", operationId, [
+        queueEmailTask("event-created-internal", () => notifyOperationEvent("Avance operativo Importadex", "Evento operativo registrado", "Se registro un avance operativo en la linea de tiempo de una operacion Importadex.", operationId, [
             { label: "Evento", value: event.event },
             { label: "Usuario", value: actorName(actor) },
-        ]);
+        ]));
         return event;
     },
     async listComments(operationId) {
@@ -833,5 +856,20 @@ exports.importadexService = {
             recentOperationsByCreator,
             riskOperations,
         };
+    },
+    async listEmailLogs(limitInput) {
+        const limit = Math.min(Math.max(Number(limitInput) || 50, 1), 200);
+        return connectionDB_1.prisma.$queryRawUnsafe(`SELECT id, status, audience, subject, recipient_masked, recipient_domain,
+        operation_id, client_id, smtp_host, smtp_user, message_id, smtp_response,
+        accepted, rejected, skipped, error_code, error_message, created_at, updated_at
+       FROM importadex_email_logs
+       ORDER BY created_at DESC
+       LIMIT $1`, limit);
+    },
+    async sendEmailTest(to, actor) {
+        return (0, emailManaged_1.sendImportadexTestEmail)(to, actorName(actor));
+    },
+    async emailHealth() {
+        return (0, emailManaged_1.checkImportadexEmailHealth)();
     },
 };

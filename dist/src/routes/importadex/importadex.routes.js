@@ -39,4 +39,7 @@ router.get("/catalogs", importadex_controller_1.importadexController.catalogs);
 router.post("/catalog-options", importadex_controller_1.importadexController.createCatalogOption);
 router.get("/dashboard", importadex_controller_1.importadexController.dashboard);
 router.get("/reports", importadex_controller_1.importadexController.reports);
+router.get("/email-logs", importadexAdmin_1.requireImportadexAdmin, importadex_controller_1.importadexController.emailLogs);
+router.get("/email-health", importadexAdmin_1.requireImportadexAdmin, importadex_controller_1.importadexController.emailHealth);
+router.post("/email-test", importadexAdmin_1.requireImportadexAdmin, importadex_controller_1.importadexController.emailTest);
 exports.default = router;

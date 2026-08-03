@@ -5,6 +5,7 @@ import type { UploadedFile } from "../../middlewares/processFiles";
 import {
   attachmentSchema,
   importadexCatalogOptionSchema,
+  importadexEmailTestSchema,
   commentSchema,
   containerSchema,
   customsFileSchema,
@@ -249,6 +250,31 @@ export const importadexController = {
   async reports(_req: Request, res: Response, next: NextFunction) {
     try {
       ok(res, await importadexService.reports());
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async emailLogs(req: Request, res: Response, next: NextFunction) {
+    try {
+      ok(res, await importadexService.listEmailLogs(req.query.limit));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async emailTest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const body = importadexEmailTestSchema.parse(req.body);
+      ok(res, await importadexService.sendEmailTest(body.to, req.importadexUser), 201);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async emailHealth(_req: Request, res: Response, next: NextFunction) {
+    try {
+      ok(res, await importadexService.emailHealth());
     } catch (error) {
       next(error);
     }

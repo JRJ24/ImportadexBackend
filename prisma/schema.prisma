@@ -110,6 +110,7 @@ model ImportadexOperation {
   comments      ImportadexComment[]
   attachments   ImportadexAttachment[]
   auditLogs     ImportadexAuditLog[]
+  emailLogs     ImportadexEmailLog[]
 
   @@index([clientId], map: "importadex_operations_client_id_idx")
   @@map("importadex_operations")
@@ -290,8 +291,40 @@ model ImportadexClient {
   createdAt          DateTime                     @default(now()) @map("created_at")
   importadexTokenDGA ImportadexTokenDGA?
   operations         ImportadexOperation[]
+  emailLogs          ImportadexEmailLog[]
 
   @@map("importadex_clients")
+}
+
+model ImportadexEmailLog {
+  id              String              @id
+  status          String
+  audience        String?
+  subject         String?
+  recipientMasked String?             @map("recipient_masked")
+  recipientDomain String?             @map("recipient_domain")
+  operationId     String?             @map("operation_id")
+  clientId        String?             @map("client_id")
+  smtpHost        String?             @map("smtp_host")
+  smtpUser        String?             @map("smtp_user")
+  messageId       String?             @map("message_id")
+  smtpResponse    String?             @map("smtp_response")
+  accepted        Int                 @default(0)
+  rejected        Int                 @default(0)
+  skipped         Boolean             @default(false)
+  errorCode       String?             @map("error_code")
+  errorMessage    String?             @map("error_message")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @default(now()) @map("updated_at")
+  operation       ImportadexOperation? @relation(fields: [operationId], references: [id])
+  client          ImportadexClient?    @relation(fields: [clientId], references: [id])
+
+  @@index([createdAt], map: "importadex_email_logs_created_at_idx")
+  @@index([audience], map: "importadex_email_logs_audience_idx")
+  @@index([status], map: "importadex_email_logs_status_idx")
+  @@index([operationId], map: "importadex_email_logs_operation_id_idx")
+  @@index([clientId], map: "importadex_email_logs_client_id_idx")
+  @@map("importadex_email_logs")
 }
 
 model ImportadexTokenDGA {
