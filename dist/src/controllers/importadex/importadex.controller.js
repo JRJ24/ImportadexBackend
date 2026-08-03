@@ -47,7 +47,7 @@ exports.importadexController = {
     },
     async createOperation(req, res, next) {
         try {
-            const data = await importadex_service_1.importadexService.createOperation(parse(importadex_schemas_1.operationSchema, req.body));
+            const data = await importadex_service_1.importadexService.createOperation(parse(importadex_schemas_1.operationSchema, req.body), req.importadexUser);
             ok(res, data, 201);
         }
         catch (error) {
@@ -71,7 +71,7 @@ exports.importadexController = {
     },
     async updateOperation(req, res, next) {
         try {
-            const data = await importadex_service_1.importadexService.updateOperation(param(req.params.id), parse(importadex_schemas_1.operationPatchSchema, req.body));
+            const data = await importadex_service_1.importadexService.updateOperation(param(req.params.id), parse(importadex_schemas_1.operationPatchSchema, req.body), req.importadexUser);
             if (!data) {
                 res.status(404).json({ ok: false, message: "Operation not found" });
                 return;
@@ -85,7 +85,7 @@ exports.importadexController = {
     async updateStatus(req, res, next) {
         try {
             const body = parse(importadex_schemas_1.statusSchema, req.body);
-            const data = await importadex_service_1.importadexService.updateStatus(param(req.params.id), String(body.status), body.note?.toString());
+            const data = await importadex_service_1.importadexService.updateStatus(param(req.params.id), String(body.status), body.note?.toString(), req.importadexUser);
             ok(res, data);
         }
         catch (error) {
@@ -102,7 +102,7 @@ exports.importadexController = {
     },
     async createEvent(req, res, next) {
         try {
-            ok(res, await importadex_service_1.importadexService.createEvent(param(req.params.id), parse(importadex_schemas_1.eventSchema, req.body)), 201);
+            ok(res, await importadex_service_1.importadexService.createEvent(param(req.params.id), parse(importadex_schemas_1.eventSchema, req.body), req.importadexUser), 201);
         }
         catch (error) {
             next(error);
@@ -146,7 +146,7 @@ exports.importadexController = {
                 res.status(400).json({ ok: false, message: "At least one file is required" });
                 return;
             }
-            const data = await importadex_service_1.importadexService.createAttachments(operationId, files, documentId);
+            const data = await importadex_service_1.importadexService.createAttachments(operationId, files, documentId, req.importadexUser);
             if (!data) {
                 res.status(404).json({ ok: false, message: "Operation not found" });
                 return;
@@ -176,7 +176,7 @@ exports.importadexController = {
             },
             create: async (req, res, next) => {
                 try {
-                    ok(res, await importadex_service_1.importadexService.createTable(key, parse(schemas[key], req.body)), 201);
+                    ok(res, await importadex_service_1.importadexService.createTable(key, parse(schemas[key], req.body), req.importadexUser), 201);
                 }
                 catch (error) {
                     if (handleServiceError(res, error))
@@ -186,7 +186,7 @@ exports.importadexController = {
             },
             update: async (req, res, next) => {
                 try {
-                    ok(res, await importadex_service_1.importadexService.updateTable(key, param(req.params.id), parse(importadex_schemas_1.patchSchemas[key], req.body)));
+                    ok(res, await importadex_service_1.importadexService.updateTable(key, param(req.params.id), parse(importadex_schemas_1.patchSchemas[key], req.body), req.importadexUser));
                 }
                 catch (error) {
                     next(error);

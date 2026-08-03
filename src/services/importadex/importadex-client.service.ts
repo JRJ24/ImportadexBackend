@@ -1,7 +1,12 @@
 import { createHmac, randomUUID } from "crypto";
 import { prisma } from "../../config/connectionDB";
 import { decrypt, encrypt } from "../../helpers/encrypted";
-import { sendImportadexClientRegistrationEmails } from "../../helpers/emailManaged";
+import {
+  sendImportadexClientCommitmentEmail,
+  sendImportadexClientRegistrationEmails,
+  sendImportadexInternalNotification,
+} from "../../helpers/emailManaged";
+import type { ImportadexAuthUser } from "../../middlewares/importadexAdmin";
 import type { UploadedFile } from "../../middlewares/processFiles";
 
 export interface ImportadexClientRegistrationPayload {
@@ -47,6 +52,7 @@ const tokenDocumentLabels: Record<TokenFileField, string> = {
 };
 
 const tokenFileFields = Object.keys(tokenDocumentLabels) as TokenFileField[];
+const commitmentFileFieldNames = new Set(["commitmentDocument", "commitment", "cartaCompromiso", "file"]);
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
@@ -114,6 +120,16 @@ const mapClient = (row: Row) => ({
 const fileByField = (files: UploadedFile[], fieldName: TokenFileField) =>
   files.find((file) => file.fieldName === fieldName);
 
+const getCommitmentFile = (files: UploadedFile[]) =>
+  files.find((file) => commitmentFileFieldNames.has(file.fieldName ?? ""));
+
+const assertPdfFile = (file: UploadedFile) => {
+  const isPdf = file.mimeType === "application/pdf" || file.originalName.toLowerCase().endsWith(".pdf");
+  if (!isPdf) {
+    throw new ImportadexClientServiceError(400, "La carta de compromiso debe ser un PDF");
+  }
+};
+
 const getTokenFiles = (files: UploadedFile[]) => {
   const mappedFiles = Object.fromEntries(
     tokenFileFields.map((fieldName) => [fieldName, fileByField(files, fieldName)]),
@@ -159,13 +175,15 @@ const auditClient = async (
   clientId: string,
   changes: unknown,
   db: DbClient = prisma,
+  actor?: string | null,
 ) => {
   await db.$executeRawUnsafe(
-    `INSERT INTO importadex_audit_logs (id, action, entity, entity_id, changes)
-     VALUES ($1, $2, 'client', $3, $4::jsonb)`,
+    `INSERT INTO importadex_audit_logs (id, action, entity, entity_id, actor, changes)
+     VALUES ($1, $2, 'client', $3, $4, $5::jsonb)`,
     randomUUID(),
     action,
     clientId,
+    actor ?? null,
     JSON.stringify(changes ?? {}),
   );
 };
@@ -178,6 +196,11 @@ const buildEmailDocuments = (tokenFiles: Record<TokenFileField, UploadedFile> | 
     url: tokenFiles[fieldName].url,
   }));
 };
+
+const actorLabel = (actor?: ImportadexAuthUser | null) => actor?.name ?? actor?.email ?? null;
+
+const clientDisplayName = (client: { name: string; lastName?: string | null }) =>
+  `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`;
 
 export const importadexClientService = {
   async registerClient(payload: ImportadexClientRegistrationPayload, files: UploadedFile[]) {
@@ -258,6 +281,113 @@ export const importadexClientService = {
     return { client, notification };
   },
 
+  async createClientByAdmin(payload: ImportadexClientRegistrationPayload, files: UploadedFile[], actor?: ImportadexAuthUser | null) {
+    const commitmentFile = getCommitmentFile(files);
+    if (!commitmentFile) {
+      throw new ImportadexClientServiceError(400, "La carta de compromiso es requerida");
+    }
+    assertPdfFile(commitmentFile);
+
+    const normalizedEmail = normalizeEmail(payload.email);
+    const existing = await findClientBySecureEmail(normalizedEmail);
+
+    if (existing) {
+      throw new ImportadexClientServiceError(409, "Ya existe un cliente con ese correo");
+    }
+
+    const tokenFiles = payload.hasDgaToken ? null : getTokenFiles(files);
+    const encryptedEmail = encrypt(normalizedEmail);
+    const emailHash = createEmailHash(normalizedEmail);
+    const reviewer = actorLabel(actor);
+
+    const client = await prisma.$transaction(async (tx) => {
+      const clientId = randomUUID();
+      const clientRows = await tx.$queryRawUnsafe<Row[]>(
+        `INSERT INTO importadex_clients (
+          id, type, name, last_name, adress, type_identification, identification,
+          gender, birth_date, phone_home_office, phone_personal, email, email_hash,
+          "feedBack", commitment_document_url, commitment_document_name, active,
+          review_status, reviewed_at, reviewed_by, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true, 'APPROVED', CURRENT_TIMESTAMP, $17, CURRENT_TIMESTAMP)
+        RETURNING *`,
+        clientId,
+        payload.type,
+        payload.name.trim(),
+        nullable(payload.lastName),
+        payload.adress.trim(),
+        payload.typeIdentification,
+        payload.identification.trim(),
+        nullable(payload.gender),
+        nullable(payload.birthDate),
+        payload.phoneHomeOffice.trim(),
+        nullable(payload.phonePersonal),
+        encryptedEmail,
+        emailHash,
+        nullable(payload.feedBack),
+        commitmentFile.url,
+        commitmentFile.originalName || commitmentFile.fileName,
+        reviewer,
+      );
+
+      if (tokenFiles) {
+        await tx.$executeRawUnsafe(
+          `INSERT INTO "importadex_token_DGA" (
+            id, "clientImportadex", current_commercial_registry,
+            certification_current_rnc_registration, copy_manager_id, authorization_video
+          ) VALUES ($1, $2, $3, $4, $5, $6)`,
+          randomUUID(),
+          clientId,
+          tokenFiles.currentCommercialRegistry.url,
+          tokenFiles.certificationCurrentRNCRegistration.url,
+          tokenFiles.copyManagerID.url,
+          tokenFiles.authorizationVideo.url,
+        );
+      }
+
+      await auditClient(
+        "ADMIN_CREATE_APPROVED",
+        clientId,
+        {
+          hasDgaToken: payload.hasDgaToken,
+          emailHash,
+          tokenDocuments: Boolean(tokenFiles),
+          commitmentDocument: commitmentFile.url,
+        },
+        tx,
+        reviewer,
+      );
+
+      return findClientById(clientRows[0].id as string, tx);
+    });
+
+    if (!client) {
+      throw new ImportadexClientServiceError(500, "No se pudo crear el cliente");
+    }
+
+    const commitmentNotification = await sendImportadexClientCommitmentEmail({
+      clientName: clientDisplayName(client),
+      clientEmail: client.email,
+      documentName: commitmentFile.originalName || commitmentFile.fileName,
+      documentUrl: commitmentFile.url,
+      documentType: commitmentFile.mimeType,
+    });
+
+    const internalNotification = await sendImportadexInternalNotification({
+      subject: "Cliente Importadex creado por administrador",
+      title: "Cliente aprobado creado por administrador",
+      summary: "Un administrador creo un cliente Importadex, quedo aprobado y se envio la carta de compromiso al correo registrado.",
+      rows: [
+        { label: "Cliente", value: clientDisplayName(client) },
+        { label: "Correo", value: client.email },
+        { label: "Identificacion", value: client.identification },
+        { label: "Creado por", value: reviewer },
+        { label: "Carta", value: commitmentFile.originalName || commitmentFile.fileName },
+      ],
+    });
+
+    return { client, notification: { commitmentNotification, internalNotification } };
+  },
+
   async listClients() {
     const rows = await prisma.$queryRawUnsafe<Row[]>(
       `SELECT c.*,
@@ -325,14 +455,15 @@ export const importadexClientService = {
 
     if (!rows[0]) return null;
 
-    await auditClient("REVIEW", id, { status, feedBack: nullable(feedBack), reviewedBy });
+    await auditClient("REVIEW", id, { status, feedBack: nullable(feedBack), reviewedBy }, prisma, reviewedBy);
     return findClientById(id);
   },
 
-  async uploadCommitmentDocument(id: string, file?: UploadedFile) {
+  async uploadCommitmentDocument(id: string, file?: UploadedFile, actor?: ImportadexAuthUser | null) {
     if (!file) {
       throw new ImportadexClientServiceError(400, "El documento de compromiso es requerido");
     }
+    assertPdfFile(file);
 
     const rows = await prisma.$queryRawUnsafe<Row[]>(
       `UPDATE importadex_clients
@@ -350,8 +481,19 @@ export const importadexClientService = {
     await auditClient("UPLOAD_COMMITMENT_DOCUMENT", id, {
       fileName: file.originalName || file.fileName,
       fileUrl: file.url,
-    });
+    }, prisma, actorLabel(actor));
 
-    return findClientById(id);
+    const client = await findClientById(id);
+    if (client) {
+      await sendImportadexClientCommitmentEmail({
+        clientName: clientDisplayName(client),
+        clientEmail: client.email,
+        documentName: file.originalName || file.fileName,
+        documentUrl: file.url,
+        documentType: file.mimeType,
+      });
+    }
+
+    return client;
   },
 };

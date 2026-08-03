@@ -32,6 +32,17 @@ exports.importadexClientController = {
                 next(error);
         }
     },
+    async createByAdmin(req, res, next) {
+        try {
+            const payload = importadex_schemas_1.importadexClientRegisterSchema.parse(req.body);
+            const data = await importadex_client_service_1.importadexClientService.createClientByAdmin(payload, getUploadedFiles(req), req.importadexUser);
+            ok(res, data, 201);
+        }
+        catch (error) {
+            if (!handleError(res, error))
+                next(error);
+        }
+    },
     async list(req, res, next) {
         try {
             ok(res, await importadex_client_service_1.importadexClientService.listClients());
@@ -64,7 +75,7 @@ exports.importadexClientController = {
     async approve(req, res, next) {
         try {
             const payload = importadex_schemas_1.importadexClientReviewSchema.parse(req.body);
-            const client = await importadex_client_service_1.importadexClientService.reviewClient(req.params.id, "APPROVED", payload.feedBack);
+            const client = await importadex_client_service_1.importadexClientService.reviewClient(req.params.id, "APPROVED", payload.feedBack, req.importadexUser?.name ?? req.importadexUser?.email);
             if (!client) {
                 res.status(404).json({ ok: false, message: "Cliente no encontrado" });
                 return;
@@ -79,7 +90,7 @@ exports.importadexClientController = {
     async reject(req, res, next) {
         try {
             const payload = importadex_schemas_1.importadexClientReviewSchema.parse(req.body);
-            const client = await importadex_client_service_1.importadexClientService.reviewClient(req.params.id, "REJECTED", payload.feedBack);
+            const client = await importadex_client_service_1.importadexClientService.reviewClient(req.params.id, "REJECTED", payload.feedBack, req.importadexUser?.name ?? req.importadexUser?.email);
             if (!client) {
                 res.status(404).json({ ok: false, message: "Cliente no encontrado" });
                 return;
@@ -93,7 +104,7 @@ exports.importadexClientController = {
     },
     async uploadCommitment(req, res, next) {
         try {
-            const client = await importadex_client_service_1.importadexClientService.uploadCommitmentDocument(req.params.id, getUploadedFiles(req)[0]);
+            const client = await importadex_client_service_1.importadexClientService.uploadCommitmentDocument(req.params.id, getUploadedFiles(req)[0], req.importadexUser);
             if (!client) {
                 res.status(404).json({ ok: false, message: "Cliente no encontrado" });
                 return;

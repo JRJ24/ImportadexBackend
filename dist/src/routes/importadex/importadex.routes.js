@@ -6,6 +6,7 @@ const importadex_controller_1 = require("../../controllers/importadex/importadex
 const importadexAdmin_1 = require("../../middlewares/importadexAdmin");
 const processFiles_1 = require("../../middlewares/processFiles");
 const router = (0, express_1.Router)();
+router.use(importadexAdmin_1.attachImportadexUser);
 router.get("/operations", importadex_controller_1.importadexController.listOperations);
 router.post("/operations", importadex_controller_1.importadexController.createOperation);
 router.get("/operations/:id", importadex_controller_1.importadexController.getOperation);
@@ -19,6 +20,7 @@ router.get("/operations/:id/attachments", importadex_controller_1.importadexCont
 router.post("/operations/:id/attachments", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
 router.post("/attachments/upload", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
 router.post("/clients/register", processFiles_1.processFile, importadex_client_controller_1.importadexClientController.register);
+router.post("/clients", importadexAdmin_1.requireImportadexAdmin, processFiles_1.processFile, importadex_client_controller_1.importadexClientController.createByAdmin);
 router.get("/clients/select", importadex_client_controller_1.importadexClientController.listApprovedOptions);
 router.get("/clients", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.list);
 router.get("/clients/:id", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.get);

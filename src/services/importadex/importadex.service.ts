@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto";
 import { prisma } from "../../config/connectionDB";
+import { sendImportadexInternalNotification } from "../../helpers/emailManaged";
+import type { ImportadexAuthUser } from "../../middlewares/importadexAdmin";
 import type { UploadedFile } from "../../middlewares/processFiles";
 
 type DbClient = Pick<typeof prisma, "$queryRawUnsafe" | "$executeRawUnsafe">;
@@ -51,6 +53,9 @@ const columnMap: Record<string, string> = {
   transportMode: "transport_mode",
   cargoType: "cargo_type",
   customsStatus: "customs_status",
+  createdById: "created_by_id",
+  createdByEmail: "created_by_email",
+  createdByName: "created_by_name",
   isActive: "is_active",
   deletedAt: "deleted_at",
   createdAt: "created_at",
@@ -87,6 +92,9 @@ const operationColumns = [
   "reference",
   "eta",
   "progress",
+  "created_by_id",
+  "created_by_email",
+  "created_by_name",
   "is_active",
   "created_at",
   "updated_at",
@@ -145,17 +153,73 @@ async function audit(
   operationId: string | null,
   changes?: unknown,
   db: DbClient = prisma,
+  actor?: string | null,
 ) {
   await db.$executeRawUnsafe(
-    `INSERT INTO importadex_audit_logs (id, action, entity, entity_id, operation_id, changes)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+    `INSERT INTO importadex_audit_logs (id, action, entity, entity_id, operation_id, actor, changes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
     randomUUID(),
     action,
     entity,
     entityId,
     operationId,
+    actor ?? null,
     JSON.stringify(changes ?? {}),
   );
+}
+
+function actorName(actor?: ImportadexAuthUser | null) {
+  return actor?.name ?? actor?.email ?? null;
+}
+
+function actorCreateFields(actor?: ImportadexAuthUser | null) {
+  return {
+    createdById: actor?.id ?? null,
+    createdByEmail: actor?.email ?? null,
+    createdByName: actorName(actor),
+  };
+}
+
+function rowText(row: unknown, key: string) {
+  const record = row && typeof row === "object" ? row as Record<string, unknown> : {};
+  const value = record[key];
+  return value === null || value === undefined ? null : String(value);
+}
+
+async function getOperationSummary(operationId: string) {
+  const rows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+    `SELECT id, code, client_name, status, customs_status, created_by_name
+     FROM importadex_operations
+     WHERE id = $1
+     LIMIT 1`,
+    operationId,
+  );
+
+  return rows[0] ?? null;
+}
+
+async function notifyOperationEvent(
+  subject: string,
+  title: string,
+  summary: string,
+  operationId: string | null | undefined,
+  rows: Array<{ label: string; value: string | number | null | undefined }> = [],
+) {
+  if (!operationId) return;
+
+  const operation = await getOperationSummary(operationId);
+  await sendImportadexInternalNotification({
+    subject,
+    title,
+    summary,
+    rows: [
+      { label: "Operacion", value: rowText(operation, "code") ?? operationId },
+      { label: "Cliente", value: rowText(operation, "client_name") },
+      { label: "Estado", value: rowText(operation, "status") },
+      { label: "Aduanas", value: rowText(operation, "customs_status") },
+      ...rows,
+    ],
+  });
 }
 
 async function upsertCatalogOption(
@@ -389,7 +453,7 @@ export const importadexService = {
     return rows[0] ?? null;
   },
 
-  async createOperation(payload: Record<string, unknown>) {
+  async createOperation(payload: Record<string, unknown>, actor?: ImportadexAuthUser | null) {
     const { container, containers, documents, customsFile, incidents, ...operationPayload } = payload;
     const client = await resolveApprovedClient(operationPayload.clientName);
     operationPayload.clientId = client.id;
@@ -408,6 +472,7 @@ export const importadexService = {
       const operation = await insert("importadex_operations", {
         ...operationPayload,
         code,
+        ...actorCreateFields(actor),
         progress: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -488,7 +553,7 @@ export const importadexService = {
         documents: documentRows.length,
         containers: initialContainers.length,
         incidents: asRecordArray(incidents).length,
-      }, tx);
+      }, tx, actorName(actor));
       await insert("importadex_events", {
         operation_id: createdOperationId,
         event: "Operacion creada con checklist documental inicial",
@@ -500,10 +565,22 @@ export const importadexService = {
       return createdOperationId;
     });
 
-    return this.getOperation(operationId);
+    const operation = await this.getOperation(operationId);
+    await notifyOperationEvent(
+      "Operacion Importadex creada",
+      "Operacion Importadex creada",
+      "Se creo una nueva operacion en el modulo Importadex.",
+      operationId,
+      [
+        { label: "Creada por", value: actorName(actor) },
+        { label: "Origen", value: rowText(operation, "origin") },
+        { label: "Destino", value: rowText(operation, "destination") },
+      ],
+    );
+    return operation;
   },
 
-  async updateOperation(id: string, payload: Record<string, unknown>) {
+  async updateOperation(id: string, payload: Record<string, unknown>, actor?: ImportadexAuthUser | null) {
     const nextPayload = { ...payload };
     if (typeof nextPayload.clientName === "string") {
       const client = await resolveApprovedClient(nextPayload.clientName);
@@ -512,11 +589,11 @@ export const importadexService = {
     }
 
     const operation = await patch("importadex_operations", id, nextPayload);
-    await audit("UPDATE", "operation", id, id, nextPayload);
+    await audit("UPDATE", "operation", id, id, nextPayload, prisma, actorName(actor));
     return operation;
   },
 
-  async updateStatus(id: string, status: string, note?: string) {
+  async updateStatus(id: string, status: string, note?: string, actor?: ImportadexAuthUser | null) {
     await patch("importadex_operations", id, { status });
     await insert("importadex_events", {
       operationId: id,
@@ -524,8 +601,22 @@ export const importadexService = {
       owner: "system",
       location: note ?? null,
     });
-    await audit("STATUS_CHANGE", "operation", id, id, { status, note });
-    return this.getOperation(id);
+    await audit("STATUS_CHANGE", "operation", id, id, { status, note }, prisma, actorName(actor));
+    const operation = await this.getOperation(id);
+    await notifyOperationEvent(
+      status === "DELIVERED" ? "Transporte Importadex entregado" : "Avance operativo Importadex",
+      status === "DELIVERED" ? "Transporte marcado como entregado" : "Avance operativo registrado",
+      status === "DELIVERED"
+        ? "Una operacion/transporte fue marcado como entregado en Importadex."
+        : "Una operacion Importadex cambio de estado operativo.",
+      id,
+      [
+        { label: "Nuevo estado", value: status },
+        { label: "Nota", value: note },
+        { label: "Usuario", value: actorName(actor) },
+      ],
+    );
+    return operation;
   },
 
   async listTable(key: TableKey) {
@@ -534,7 +625,7 @@ export const importadexService = {
     );
   },
 
-  async createTable(key: TableKey, payload: Record<string, unknown>) {
+  async createTable(key: TableKey, payload: Record<string, unknown>, actor?: ImportadexAuthUser | null) {
     const operationId = typeof payload.operationId === "string" ? payload.operationId : undefined;
 
     if (operationId && !(await findById("importadex_operations", operationId))) {
@@ -558,6 +649,17 @@ export const importadexService = {
         owner: "system",
         location: (item as { status?: string }).status ?? "PENDING",
       });
+      await notifyOperationEvent(
+        "Avance documental Importadex",
+        "Documento creado en operacion Importadex",
+        "Se creo un documento en el expediente documental de una operacion.",
+        itemOperationId,
+        [
+          { label: "Documento", value: (item as { name?: string }).name },
+          { label: "Estado", value: (item as { status?: string }).status },
+          { label: "Usuario", value: actorName(actor) },
+        ],
+      );
     }
 
     if (key === "customs-files" && itemOperationId) {
@@ -572,6 +674,17 @@ export const importadexService = {
         owner: (item as { responsible?: string }).responsible ?? "Aduanas",
         location: (item as { declaration_no?: string }).declaration_no ?? null,
       });
+      await notifyOperationEvent(
+        "Estado aduanal Importadex modificado",
+        "Expediente aduanal creado",
+        "Se creo o actualizo el estado aduanal de una operacion Importadex.",
+        itemOperationId,
+        [
+          { label: "Estado aduanal", value: status },
+          { label: "Responsable", value: (item as { responsible?: string }).responsible },
+          { label: "Usuario", value: actorName(actor) },
+        ],
+      );
     }
 
     if (key === "incidents" && itemOperationId) {
@@ -589,6 +702,8 @@ export const importadexService = {
       (item as { id: string }).id,
       itemOperationId ?? null,
       item,
+      prisma,
+      actorName(actor),
     );
     return item;
   },
@@ -603,7 +718,7 @@ export const importadexService = {
     );
   },
 
-  async createAttachments(operationId: string, files: UploadedFile[], documentId?: string | null) {
+  async createAttachments(operationId: string, files: UploadedFile[], documentId?: string | null, actor?: ImportadexAuthUser | null) {
     const operation = await findById("importadex_operations", operationId);
     if (!operation) return null;
 
@@ -651,7 +766,20 @@ export const importadexService = {
         .map((file) => file.originalName || file.fileName)
         .join(", "),
     });
-    await audit("CREATE", "attachments", null, operationId, { documentId: document?.id ?? null, attachments });
+    await audit("CREATE", "attachments", null, operationId, { documentId: document?.id ?? null, attachments }, prisma, actorName(actor));
+    await notifyOperationEvent(
+      document ? "Avance documental Importadex" : "Evidencia Importadex creada",
+      document ? "Documento recibido con evidencia" : "Evidencia cargada en operacion",
+      document
+        ? "Se cargo una evidencia asociada a un documento de la operacion."
+        : "Se cargo una nueva evidencia en la operacion Importadex.",
+      operationId,
+      [
+        { label: "Documento", value: document?.name },
+        { label: "Archivos", value: files.map((file) => file.originalName || file.fileName).join(", ") },
+        { label: "Usuario", value: actorName(actor) },
+      ],
+    );
 
     return this.getOperation(operationId);
   },
@@ -660,6 +788,7 @@ export const importadexService = {
     key: TableKey,
     id: string,
     payload: Record<string, unknown>,
+    actor?: ImportadexAuthUser | null,
   ) {
     const item = await patch(tableMap[key], id, payload);
     const operationId = (item as { operation_id?: string } | null)?.operation_id ?? null;
@@ -672,6 +801,17 @@ export const importadexService = {
         owner: "system",
         location: (item as { status?: string }).status ?? null,
       });
+      await notifyOperationEvent(
+        "Avance documental Importadex",
+        "Documento actualizado en operacion Importadex",
+        "Se actualizo un documento del expediente documental de una operacion.",
+        operationId,
+        [
+          { label: "Documento", value: (item as { name?: string }).name },
+          { label: "Estado", value: (item as { status?: string }).status },
+          { label: "Usuario", value: actorName(actor) },
+        ],
+      );
     }
 
     if (key === "customs-files" && operationId) {
@@ -686,6 +826,17 @@ export const importadexService = {
         owner: (item as { responsible?: string }).responsible ?? "Aduanas",
         location: (item as { declaration_no?: string }).declaration_no ?? null,
       });
+      await notifyOperationEvent(
+        "Estado aduanal Importadex modificado",
+        "Expediente aduanal actualizado",
+        "Se modifico el estado aduanal de una operacion Importadex.",
+        operationId,
+        [
+          { label: "Estado aduanal", value: status },
+          { label: "Responsable", value: (item as { responsible?: string }).responsible },
+          { label: "Usuario", value: actorName(actor) },
+        ],
+      );
     }
 
     if (key === "incidents" && operationId) {
@@ -703,6 +854,8 @@ export const importadexService = {
       id,
       operationId,
       payload,
+      prisma,
+      actorName(actor),
     );
     return item;
   },
@@ -714,7 +867,7 @@ export const importadexService = {
     );
   },
 
-  async createEvent(operationId: string, payload: Record<string, unknown>) {
+  async createEvent(operationId: string, payload: Record<string, unknown>, actor?: ImportadexAuthUser | null) {
     const event = await insert("importadex_events", {
       ...payload,
       operationId,
@@ -725,6 +878,18 @@ export const importadexService = {
       (event as { id: string }).id,
       operationId,
       event,
+      prisma,
+      actorName(actor),
+    );
+    await notifyOperationEvent(
+      "Avance operativo Importadex",
+      "Evento operativo registrado",
+      "Se registro un avance operativo en la linea de tiempo de una operacion Importadex.",
+      operationId,
+      [
+        { label: "Evento", value: (event as { event?: string }).event },
+        { label: "Usuario", value: actorName(actor) },
+      ],
     );
     return event;
   },
@@ -917,6 +1082,22 @@ export const importadexService = {
        ORDER BY label DESC
        LIMIT 12`,
     );
+    const operationsByCreator = await prisma.$queryRawUnsafe<unknown[]>(
+      `SELECT COALESCE(NULLIF(created_by_name, ''), NULLIF(created_by_email, ''), 'Sin creador registrado') AS label,
+        COUNT(*)::int AS total
+       FROM importadex_operations
+       WHERE is_active = true
+       GROUP BY COALESCE(NULLIF(created_by_name, ''), NULLIF(created_by_email, ''), 'Sin creador registrado')
+       ORDER BY total DESC, label
+       LIMIT 12`,
+    );
+    const recentOperationsByCreator = await prisma.$queryRawUnsafe<unknown[]>(
+      `SELECT id, code, client_name, status, created_by_name, created_by_email, created_at
+       FROM importadex_operations
+       WHERE is_active = true
+       ORDER BY created_at DESC
+       LIMIT 20`,
+    );
     const riskOperations = await prisma.$queryRawUnsafe<unknown[]>(
       `SELECT
         o.id,
@@ -974,6 +1155,8 @@ export const importadexService = {
       customsByStatus,
       topClients,
       monthlyOperations,
+      operationsByCreator,
+      recentOperationsByCreator,
       riskOperations,
     };
   },

@@ -72,7 +72,7 @@ export const importadexController = {
 
   async createOperation(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await importadexService.createOperation(parse(operationSchema, req.body));
+      const data = await importadexService.createOperation(parse(operationSchema, req.body), req.importadexUser);
       ok(res, data, 201);
     } catch (error) {
       if (handleServiceError(res, error)) return;
@@ -95,7 +95,7 @@ export const importadexController = {
 
   async updateOperation(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await importadexService.updateOperation(param(req.params.id), parse(operationPatchSchema, req.body));
+      const data = await importadexService.updateOperation(param(req.params.id), parse(operationPatchSchema, req.body), req.importadexUser);
       if (!data) {
         res.status(404).json({ ok: false, message: "Operation not found" });
         return;
@@ -109,7 +109,7 @@ export const importadexController = {
   async updateStatus(req: Request, res: Response, next: NextFunction) {
     try {
       const body = parse(statusSchema, req.body);
-      const data = await importadexService.updateStatus(param(req.params.id), String(body.status), body.note?.toString());
+      const data = await importadexService.updateStatus(param(req.params.id), String(body.status), body.note?.toString(), req.importadexUser);
       ok(res, data);
     } catch (error) {
       next(error);
@@ -126,7 +126,7 @@ export const importadexController = {
 
   async createEvent(req: Request, res: Response, next: NextFunction) {
     try {
-      ok(res, await importadexService.createEvent(param(req.params.id), parse(eventSchema, req.body)), 201);
+      ok(res, await importadexService.createEvent(param(req.params.id), parse(eventSchema, req.body), req.importadexUser), 201);
     } catch (error) {
       next(error);
     }
@@ -173,7 +173,7 @@ export const importadexController = {
         return;
       }
 
-      const data = await importadexService.createAttachments(operationId, files, documentId);
+      const data = await importadexService.createAttachments(operationId, files, documentId, req.importadexUser);
       if (!data) {
         res.status(404).json({ ok: false, message: "Operation not found" });
         return;
@@ -204,7 +204,7 @@ export const importadexController = {
       },
       create: async (req: Request, res: Response, next: NextFunction) => {
         try {
-          ok(res, await importadexService.createTable(key, parse(schemas[key], req.body)), 201);
+          ok(res, await importadexService.createTable(key, parse(schemas[key], req.body), req.importadexUser), 201);
         } catch (error) {
           if (handleServiceError(res, error)) return;
           next(error);
@@ -212,7 +212,7 @@ export const importadexController = {
       },
       update: async (req: Request, res: Response, next: NextFunction) => {
         try {
-          ok(res, await importadexService.updateTable(key, param(req.params.id), parse(patchSchemas[key], req.body)));
+          ok(res, await importadexService.updateTable(key, param(req.params.id), parse(patchSchemas[key], req.body), req.importadexUser));
         } catch (error) {
           next(error);
         }

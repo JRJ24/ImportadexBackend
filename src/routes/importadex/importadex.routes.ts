@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { importadexClientController } from "../../controllers/importadex/importadex-client.controller";
 import { importadexController } from "../../controllers/importadex/importadex.controller";
-import { requireImportadexAdmin } from "../../middlewares/importadexAdmin";
+import { attachImportadexUser, requireImportadexAdmin } from "../../middlewares/importadexAdmin";
 import { processFile } from "../../middlewares/processFiles";
 
 const router = Router();
+
+router.use(attachImportadexUser);
 
 router.get("/operations", importadexController.listOperations);
 router.post("/operations", importadexController.createOperation);
@@ -20,6 +22,7 @@ router.post("/operations/:id/attachments", processFile, importadexController.upl
 router.post("/attachments/upload", processFile, importadexController.uploadOperationAttachments);
 
 router.post("/clients/register", processFile, importadexClientController.register);
+router.post("/clients", requireImportadexAdmin, processFile, importadexClientController.createByAdmin);
 router.get("/clients/select", importadexClientController.listApprovedOptions);
 router.get("/clients", requireImportadexAdmin, importadexClientController.list);
 router.get("/clients/:id", requireImportadexAdmin, importadexClientController.get);

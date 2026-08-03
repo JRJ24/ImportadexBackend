@@ -42,6 +42,16 @@ export const importadexClientController = {
     }
   },
 
+  async createByAdmin(req: Request, res: Response, next: NextFunction) {
+    try {
+      const payload = importadexClientRegisterSchema.parse(req.body);
+      const data = await importadexClientService.createClientByAdmin(payload, getUploadedFiles(req), req.importadexUser);
+      ok(res, data, 201);
+    } catch (error) {
+      if (!handleError(res, error)) next(error);
+    }
+  },
+
   async list(req: Request, res: Response, next: NextFunction) {
     try {
       ok(res, await importadexClientService.listClients());
@@ -75,7 +85,7 @@ export const importadexClientController = {
   async approve(req: Request<{ id: string }>, res: Response, next: NextFunction) {
     try {
       const payload = importadexClientReviewSchema.parse(req.body);
-      const client = await importadexClientService.reviewClient(req.params.id, "APPROVED", payload.feedBack);
+      const client = await importadexClientService.reviewClient(req.params.id, "APPROVED", payload.feedBack, req.importadexUser?.name ?? req.importadexUser?.email);
       if (!client) {
         res.status(404).json({ ok: false, message: "Cliente no encontrado" });
         return;
@@ -90,7 +100,7 @@ export const importadexClientController = {
   async reject(req: Request<{ id: string }>, res: Response, next: NextFunction) {
     try {
       const payload = importadexClientReviewSchema.parse(req.body);
-      const client = await importadexClientService.reviewClient(req.params.id, "REJECTED", payload.feedBack);
+      const client = await importadexClientService.reviewClient(req.params.id, "REJECTED", payload.feedBack, req.importadexUser?.name ?? req.importadexUser?.email);
       if (!client) {
         res.status(404).json({ ok: false, message: "Cliente no encontrado" });
         return;
@@ -104,7 +114,7 @@ export const importadexClientController = {
 
   async uploadCommitment(req: Request<{ id: string }>, res: Response, next: NextFunction) {
     try {
-      const client = await importadexClientService.uploadCommitmentDocument(req.params.id, getUploadedFiles(req)[0]);
+      const client = await importadexClientService.uploadCommitmentDocument(req.params.id, getUploadedFiles(req)[0], req.importadexUser);
       if (!client) {
         res.status(404).json({ ok: false, message: "Cliente no encontrado" });
         return;
