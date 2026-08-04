@@ -220,9 +220,11 @@ async function notifyOperationEvent(
   summary: string,
   operationId: string | null | undefined,
   rows: Array<{ label: string; value: string | number | null | undefined }> = [],
+  options: { notifyClient?: boolean } = {},
 ) {
   if (!operationId) return;
 
+  const { notifyClient = true } = options;
   const operation = await getOperationSummary(operationId);
   const operationCode = rowText(operation, "code") ?? operationId;
   const detailRows = [
@@ -243,7 +245,7 @@ async function notifyOperationEvent(
   });
 
   const clientId = rowText(operation, "client_id");
-  if (clientId) {
+  if (notifyClient && clientId) {
     const client = await importadexClientService.getClient(clientId);
     if (client?.email) {
       const clientDisplayName = `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`;
@@ -624,6 +626,7 @@ export const importadexService = {
         { label: "Origen", value: rowText(operation, "origin") },
         { label: "Destino", value: rowText(operation, "destination") },
       ],
+      { notifyClient: false }, // ya se envia un email dedicado al cliente justo abajo (operation-created-client)
     ));
     queueEmailTask("operation-created-client", () => sendImportadexClientOperationEmail({
       operationId,
