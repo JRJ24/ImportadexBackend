@@ -76,9 +76,9 @@ async function seedOperation() {
   await prisma.$executeRawUnsafe(
     `INSERT INTO importadex_operations (
       id, code, client_name, operation_type, transport_mode, cargo_type, status,
-      customs_status, priority, origin, destination, port, carrier, reference, eta, progress
+      customs_status, priority, origin, destination, port, carrier, reference, eta, progress, updated_at
     )
-    VALUES ($1, $2, $3, 'IMPORT', 'SEA', 'CONTAINERIZED', 'IN_CUSTOMS', $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    VALUES ($1, $2, $3, 'IMPORT', 'SEA', 'CONTAINERIZED', 'IN_CUSTOMS', $4, $5, $6, $7, $8, $9, $10, $11, $12, now())`,
     id,
     "IMP-2407-018",
     "Repuestos Andinos",
@@ -105,8 +105,8 @@ async function seedChildren(operationId: string) {
   if ((countRows[0]?.total ?? 0) > 0) return;
 
   await prisma.$executeRawUnsafe(
-    `INSERT INTO importadex_containers (id, operation_id, number, type, seal, carrier, free_days, return_limit, status)
-     VALUES ($1, $2, $3, $4, $5, $6, 7, $7, $8)`,
+    `INSERT INTO importadex_containers (id, operation_id, number, type, seal, carrier, free_days, return_limit, status, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 7, $7, $8, now())`,
     randomUUID(),
     operationId,
     "MSCU8734210",
@@ -118,8 +118,8 @@ async function seedChildren(operationId: string) {
   );
 
   await prisma.$executeRawUnsafe(
-    `INSERT INTO importadex_cargo_items (id, operation_id, package_type, pieces, pallets, weight_kg, volume_cbm, handling)
-     VALUES ($1, $2, $3, 84, 18, 21480, 58, $4)`,
+    `INSERT INTO importadex_cargo_items (id, operation_id, package_type, pieces, pallets, weight_kg, volume_cbm, handling, updated_at)
+     VALUES ($1, $2, $3, 84, 18, 21480, 58, $4, now())`,
     randomUUID(),
     operationId,
     "Carga paletizada",
@@ -132,8 +132,8 @@ async function seedChildren(operationId: string) {
     ["Liberacion naviera", "Naviera", "PENDING", "Operaciones"],
   ]) {
     await prisma.$executeRawUnsafe(
-      `INSERT INTO importadex_documents (id, operation_id, name, type, status, owner)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO importadex_documents (id, operation_id, name, type, status, owner, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())`,
       randomUUID(),
       operationId,
       name,
@@ -144,8 +144,8 @@ async function seedChildren(operationId: string) {
   }
 
   await prisma.$executeRawUnsafe(
-    `INSERT INTO importadex_customs_files (id, operation_id, declaration_no, regime, channel, status, responsible)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    `INSERT INTO importadex_customs_files (id, operation_id, declaration_no, regime, channel, status, responsible, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
     randomUUID(),
     operationId,
     "DIM-2026-9182",
@@ -156,8 +156,8 @@ async function seedChildren(operationId: string) {
   );
 
   await prisma.$executeRawUnsafe(
-    `INSERT INTO importadex_incidents (id, operation_id, type, severity, status, owner, description)
-     VALUES ($1, $2, $3, 'MEDIUM', 'OPEN', $4, $5)`,
+    `INSERT INTO importadex_incidents (id, operation_id, type, severity, status, owner, description, updated_at)
+     VALUES ($1, $2, $3, 'MEDIUM', 'OPEN', $4, $5, now())`,
     randomUUID(),
     operationId,
     "Pago pendiente",

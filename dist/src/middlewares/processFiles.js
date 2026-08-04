@@ -10,14 +10,18 @@ const promises_1 = require("fs/promises");
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 const sharp_1 = __importDefault(require("sharp"));
-const s3Client = new client_s3_1.S3Client({
-    endpoint: process.env.SPACES_ENDPOINT,
-    region: process.env.SPACES_REGION,
-    credentials: {
-        accessKeyId: process.env.ACCESS_KEY_ID || "",
-        secretAccessKey: process.env.ACCESS_SECRET_KEY || "",
-    },
-});
+let s3Client = null;
+const getS3Client = () => {
+    s3Client ??= new client_s3_1.S3Client({
+        endpoint: process.env.SPACES_ENDPOINT,
+        region: process.env.SPACES_REGION,
+        credentials: {
+            accessKeyId: process.env.ACCESS_KEY_ID || "",
+            secretAccessKey: process.env.ACCESS_SECRET_KEY || "",
+        },
+    });
+    return s3Client;
+};
 const storage = multer_1.default.memoryStorage();
 const allowedMimeTypes = new Set([
     "application/pdf",
@@ -109,7 +113,7 @@ const processFile = (req, res, next) => {
                         .toBuffer();
                 }
                 if (bucketName) {
-                    await s3Client.send(new client_s3_1.PutObjectCommand({
+                    await getS3Client().send(new client_s3_1.PutObjectCommand({
                         Bucket: bucketName,
                         Key: fileKey,
                         Body: fileBuffer,

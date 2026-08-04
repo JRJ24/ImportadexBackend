@@ -16,14 +16,20 @@ export interface UploadedFile {
   url: string;
 }
 
-const s3Client = new S3Client({
-  endpoint: process.env.SPACES_ENDPOINT,
-  region: process.env.SPACES_REGION,
-  credentials: {
-    accessKeyId: process.env.ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.ACCESS_SECRET_KEY || "",
-  },
-});
+let s3Client: S3Client | null = null;
+
+const getS3Client = () => {
+  s3Client ??= new S3Client({
+    endpoint: process.env.SPACES_ENDPOINT,
+    region: process.env.SPACES_REGION,
+    credentials: {
+      accessKeyId: process.env.ACCESS_KEY_ID || "",
+      secretAccessKey: process.env.ACCESS_SECRET_KEY || "",
+    },
+  });
+
+  return s3Client;
+};
 
 const storage = multer.memoryStorage();
 
@@ -132,7 +138,7 @@ export const processFile = (req: Request, res: Response, next: NextFunction) => 
           }
 
           if (bucketName) {
-            await s3Client.send(
+            await getS3Client().send(
               new PutObjectCommand({
                 Bucket: bucketName,
                 Key: fileKey,
