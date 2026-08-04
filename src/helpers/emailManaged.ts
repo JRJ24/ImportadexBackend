@@ -391,31 +391,6 @@ const sendTransportMail = async (mailOptions: Record<string, unknown>): Promise<
   throw attachSmtpAttempts(lastError, attempts);
 };
 
-const getMaxConcurrentSends = () => numberEnv("SMTP_MAX_CONCURRENT_SENDS", 1);
-
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  task: (item: T) => Promise<R>,
-): Promise<PromiseSettledResult<R>[]> {
-  const results: PromiseSettledResult<R>[] = new Array(items.length);
-  let cursor = 0;
-
-  const worker = async () => {
-    while (cursor < items.length) {
-      const index = cursor++;
-      try {
-        results[index] = { status: "fulfilled", value: await task(items[index]) };
-      } catch (reason) {
-        results[index] = { status: "rejected", reason };
-      }
-    }
-  };
-
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
-  return results;
-}
-
 let dnsWarningLogged = false;
 
 const getEmailDomain = (email?: string) => email?.split("@")[1]?.trim().toLowerCase();
@@ -792,115 +767,50 @@ const sendMail = async ({
     }));
 
     if (privateRecipients) {
-      const results = await mapWithConcurrency(
-        recipients.deliverable,
-        getMaxConcurrentSends(),
-        (recipient) =>
-          sendTransportMail({
-            from: fromHeader,
-            sender: fromAddress,
-            replyTo: fromAddress,
-            to: recipient,
-            bcc: auditBcc.length ? auditBcc : undefined,
-            subject,
-            text,
-            html,
-            headers: {
-              "X-Importadex-Notification": "true",
-              "X-Auto-Response-Suppress": "OOF, AutoReply",
-            },
-            attachments: attachmentOptions,
-            envelope: {
-              from: fromAddress,
-              to: uniqueEmails([recipient, ...auditBcc]),
-            },
-          }),
-      );
+      // One connection, BCC to everyone (still hides recipients from each other) — sending one
+      // connection per recipient used to trip Bluehost's limit on new connections per burst.
+      const info = await sendTransportMail({
+        from: fromHeader,
+        sender: fromAddress,
+        replyTo: fromAddress,
+        to: fromAddress,
+        bcc: uniqueEmails([...recipients.deliverable, ...auditBcc]),
+        subject,
+        text,
+        html,
+        headers: {
+          "X-Importadex-Notification": "true",
+          "X-Auto-Response-Suppress": "OOF, AutoReply",
+        },
+        attachments: attachmentOptions,
+        envelope: {
+          from: fromAddress,
+          to: uniqueEmails([...recipients.deliverable, ...auditBcc]),
+        },
+      });
 
+      const acceptedList = normalizeEmailArray(info.accepted);
+      const rejectedList = normalizeEmailArray(info.rejected);
       const logUpdates: Array<Promise<void>> = [];
-      const deliveryResults = results.map((result, index) => {
-        const recipient = recipients.deliverable[index];
+      const deliveryResults = recipients.deliverable.map((recipient, index) => {
+        const mainAccepted = acceptedList.length ? hasEmail(acceptedList, recipient) : !hasEmail(rejectedList, recipient);
         const log = queuedLogs[index];
-
-        if (result.status === "fulfilled") {
-          const acceptedList = normalizeEmailArray(result.value.accepted);
-          const rejectedList = normalizeEmailArray(result.value.rejected);
-          const mainAccepted = acceptedList.length ? hasEmail(acceptedList, recipient) : !hasEmail(rejectedList, recipient);
-          const status: EmailStatus = mainAccepted ? "ACCEPTED" : "FAILED";
-          logUpdates.push(updateEmailLog(log.id, {
-            status,
-            smtpHost: formatSmtpConfig(result.value.smtpConfig),
-            messageId: result.value.messageId,
-            smtpResponse: result.value.response,
-            accepted: mainAccepted ? 1 : 0,
-            rejected: mainAccepted ? 0 : 1,
-            skipped: false,
-            errorMessage: mainAccepted ? null : "Recipient was rejected by SMTP server",
-          }));
-
-          return {
-            recipient,
-            accepted: mainAccepted ? 1 : 0,
-            rejected: mainAccepted ? 0 : 1,
-            smtpAccepted: acceptedList.length,
-            smtpRejected: rejectedList.length,
-            response: result.value.response,
-            messageId: result.value.messageId,
-          };
-        }
-
-        const smtpError = result.reason as { code?: string; command?: string; responseCode?: number; response?: string; message?: string };
         logUpdates.push(updateEmailLog(log.id, {
-          status: "FAILED",
-          smtpHost: getErrorSmtpHost(smtpError),
-          smtpResponse: smtpError.response,
-          accepted: 0,
-          rejected: 1,
+          status: mainAccepted ? "ACCEPTED" : "FAILED",
+          smtpHost: formatSmtpConfig(info.smtpConfig),
+          messageId: info.messageId,
+          smtpResponse: info.response,
+          accepted: mainAccepted ? 1 : 0,
+          rejected: mainAccepted ? 0 : 1,
           skipped: false,
-          errorCode: smtpError.code,
-          errorMessage: smtpError.message,
+          errorMessage: mainAccepted ? null : "Recipient was rejected by SMTP server",
         }));
-
-        return {
-          recipient,
-          accepted: 0,
-          rejected: 1,
-          code: smtpError.code,
-          command: smtpError.command,
-          responseCode: smtpError.responseCode,
-          response: smtpError.response,
-          message: smtpError.message,
-        };
+        return { recipient, accepted: mainAccepted ? 1 : 0, rejected: mainAccepted ? 0 : 1 };
       });
 
       const accepted = deliveryResults.reduce((total, result) => total + result.accepted, 0);
       const rejected = deliveryResults.reduce((total, result) => total + result.rejected, 0);
       await Promise.all(logUpdates);
-      const responses = results.map((result, index) => {
-        const recipient = maskEmail(recipients.deliverable[index]);
-        if (result.status === "fulfilled") {
-          const deliveryResult = deliveryResults[index];
-          return {
-            recipient,
-            accepted: deliveryResult.accepted,
-            rejected: deliveryResult.rejected,
-            smtpAccepted: deliveryResult.smtpAccepted,
-            smtpRejected: deliveryResult.smtpRejected,
-            response: result.value.response,
-            messageId: result.value.messageId,
-          };
-        }
-
-        const smtpError = result.reason as { code?: string; command?: string; responseCode?: number; response?: string; message?: string };
-        return {
-          recipient,
-          code: smtpError.code,
-          command: smtpError.command,
-          responseCode: smtpError.responseCode,
-          response: smtpError.response,
-          message: smtpError.message,
-        };
-      });
 
       const logPayload = {
         audience,
@@ -914,8 +824,11 @@ const sendMail = async ({
         auditBccRecipients: auditBcc.length,
         accepted,
         rejected,
-        deliveryMode: "individual",
-        responses,
+        deliveryMode: "bcc-single-connection",
+        smtpAccepted: acceptedList.length,
+        smtpRejected: rejectedList.length,
+        response: info.response,
+        messageId: info.messageId,
       };
 
       if (accepted > 0) {
