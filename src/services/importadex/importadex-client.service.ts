@@ -4,6 +4,7 @@ import { decrypt, encrypt } from "../../helpers/encrypted";
 import {
   sendImportadexClientCommitmentEmail,
   sendImportadexClientRegistrationEmails,
+  sendImportadexClientReviewEmail,
   sendImportadexInternalNotification,
 } from "../../helpers/emailManaged";
 import type { ImportadexAuthUser } from "../../middlewares/importadexAdmin";
@@ -458,7 +459,19 @@ export const importadexClientService = {
     if (!rows[0]) return null;
 
     await auditClient("REVIEW", id, { status, feedBack: nullable(feedBack), reviewedBy }, prisma, reviewedBy);
-    return findClientById(id);
+    const client = await findClientById(id);
+
+    if (client) {
+      await sendImportadexClientReviewEmail({
+        clientId: client.id,
+        clientName: clientDisplayName(client),
+        clientEmail: client.email,
+        status,
+        feedBack: client.feedBack,
+      });
+    }
+
+    return client;
   },
 
   async uploadCommitmentDocument(id: string, file?: UploadedFile, actor?: ImportadexAuthUser | null) {
