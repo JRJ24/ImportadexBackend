@@ -170,6 +170,14 @@ interface OperationEmailPayload {
   destination?: string | null;
 }
 
+interface ClientReviewEmailPayload {
+  clientId?: string | null;
+  clientName: string;
+  clientEmail: string;
+  status: "APPROVED" | "REJECTED";
+  feedBack?: string | null;
+}
+
 export interface ImportadexInternalNotificationPayload {
   operationId?: string | null;
   clientId?: string | null;
@@ -1191,6 +1199,27 @@ export async function sendImportadexClientCommitmentEmail(payload: CommitmentEma
         contentType: payload.documentType || "application/pdf",
       },
     ],
+    audience: "client",
+    clientId: payload.clientId,
+  });
+}
+
+export async function sendImportadexClientReviewEmail(payload: ClientReviewEmailPayload) {
+  const approved = payload.status === "APPROVED";
+  const title = approved ? "Registro Importadex aprobado" : "Registro Importadex rechazado";
+  const summary = approved
+    ? `Hola ${payload.clientName}, tu registro en Importadex fue aprobado. Ya puedes iniciar operaciones desde la plataforma.`
+    : `Hola ${payload.clientName}, tu registro en Importadex fue rechazado.${payload.feedBack ? "" : " Contacta a nuestro equipo si necesitas mas informacion."}`;
+  const rows = [
+    { label: "Estado", value: approved ? "Aprobado" : "Rechazado" },
+    ...(payload.feedBack ? [{ label: "Motivo", value: payload.feedBack }] : []),
+  ];
+
+  return sendMail({
+    to: payload.clientEmail,
+    subject: title,
+    html: buildBrandedHtml({ title, summary, rows }),
+    text: buildPlainText({ title, summary, rows }),
     audience: "client",
     clientId: payload.clientId,
   });
