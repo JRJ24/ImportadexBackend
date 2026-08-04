@@ -354,27 +354,44 @@ const getErrorSmtpHost = (error: unknown) => {
   return lastAttempt ? formatSmtpConfig(lastAttempt) : null;
 };
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isTransientConnectionError = (error: unknown) => {
+  const code = (error as { code?: string })?.code;
+  return code === "ESOCKET" || code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "ECONNRESET";
+};
+
+const getConnectionRetries = () => numberEnv("SMTP_CONNECTION_RETRIES", 2);
+
 const sendTransportMail = async (mailOptions: Record<string, unknown>): Promise<SentMessageInfo> => {
   const configs = getSmtpConfigs();
   const attempts: SmtpAttempt[] = [];
   let lastError: unknown = new Error("SMTP_HOST, SMTP_USER or SMTP_PASSWORD is missing");
+  const maxRetries = getConnectionRetries();
 
   for (const config of configs) {
-    try {
-      const transporter = createTransporter(config);
-      const info = await (transporter.sendMail as unknown as (options: Record<string, unknown>) => Promise<SentMessageInfo>)(mailOptions);
-      attempts.push(toSmtpAttempt(config));
-      return { ...info, smtpConfig: config, smtpAttempts: attempts };
-    } catch (error) {
-      attempts.push(toSmtpAttempt(config, error));
-      lastError = error;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const transporter = createTransporter(config);
+        const info = await (transporter.sendMail as unknown as (options: Record<string, unknown>) => Promise<SentMessageInfo>)(mailOptions);
+        attempts.push(toSmtpAttempt(config));
+        return { ...info, smtpConfig: config, smtpAttempts: attempts };
+      } catch (error) {
+        attempts.push(toSmtpAttempt(config, error));
+        lastError = error;
+        if (attempt < maxRetries && isTransientConnectionError(error)) {
+          await delay(300 * (attempt + 1));
+          continue;
+        }
+        break;
+      }
     }
   }
 
   throw attachSmtpAttempts(lastError, attempts);
 };
 
-const getMaxConcurrentSends = () => numberEnv("SMTP_MAX_CONCURRENT_SENDS", 2);
+const getMaxConcurrentSends = () => numberEnv("SMTP_MAX_CONCURRENT_SENDS", 1);
 
 async function mapWithConcurrency<T, R>(
   items: T[],

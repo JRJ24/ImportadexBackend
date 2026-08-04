@@ -102,7 +102,8 @@ EMAILUSER / EMAILPASS / EMAIL_FROM
 SMTP_HOST / SMTP_PORT / SMTP_SECURE / SMTP_USER / SMTP_PASSWORD
 SMTP_FALLBACK_HOSTS
 SMTP_CONNECTION_TIMEOUT_MS / SMTP_GREETING_TIMEOUT_MS / SMTP_SOCKET_TIMEOUT_MS
-SMTP_MAX_CONCURRENT_SENDS   # tope de conexiones SMTP simultaneas al enviar a multiples destinatarios (default 2, ver seccion 12)
+SMTP_MAX_CONCURRENT_SENDS   # tope de conexiones SMTP simultaneas al enviar a multiples destinatarios (default 1, ver seccion 12)
+SMTP_CONNECTION_RETRIES     # reintentos por conexion transitoria fallida (ESOCKET/ECONNREFUSED/etc), default 2, ver seccion 12
 SMTP_ALLOW_LOCAL_RECIPIENTS
 IMPORTADEX_EMAIL_AUDIT_BCC   # BCC de auditoría para emails salientes
 
@@ -254,6 +255,12 @@ No existe pipeline de CI/CD — todo el proceso arriba es manual. Considerar aut
 
 **Causa raíz confirmada (vía `importadex_email_logs` en producción):** `sendMail()` en `src/helpers/emailManaged.ts`, cuando `privateRecipients: true` (usado para `audience: "internal"`), enviaba un correo independiente por cada destinatario **en paralelo** (`Promise.allSettled` sobre todos los destinatarios a la vez), y cada envío abre su propia conexión SMTP nueva contra el mismo buzón (`info@importadex.do` en Bluehost). Con 7-8 destinatarios simultáneos, Bluehost rechaza las conexiones que exceden su límite de conexiones concurrentes por cuenta (`ECONNREFUSED` en el connect, no un error de credenciales ni de destinatario). El log real mostró 5 de 8 conexiones aceptadas y 3 rechazadas, con destinatarios distintos cada vez segun el orden/timing de las conexiones — de ahí la aleatoriedad reportada.
 
-**Fix aplicado:** se agregó `mapWithConcurrency()` en `emailManaged.ts`, que limita cuántos envíos de `sendTransportMail` corren a la vez (por defecto 2, configurable via `SMTP_MAX_CONCURRENT_SENDS`), reemplazando el `Promise.allSettled` sin límite en el branch de `privateRecipients`. No cambia el comportamiento visible (sigue siendo un correo individual por destinatario, mismo log por destinatario) — solo evita saturar el límite de conexiones del hosting.
+**Fix aplicado (primera iteración):** se agregó `mapWithConcurrency()` en `emailManaged.ts`, limitando `sendTransportMail` a 2 conexiones simultáneas (`SMTP_MAX_CONCURRENT_SENDS`), reemplazando el `Promise.allSettled` sin límite. **Resultado: insuficiente.** Se probó de nuevo en producción con una operación real y **los mismos 3 destinatarios volvieron a fallar con `ECONNREFUSED`** (confirmado con `updated_at` de `importadex_email_logs`, no solo `created_at` — el batch completo tardó ~2.5s, evidencia de que sí hubo throttling real, pero 2 conexiones simultáneas seguían siendo demasiadas para lo que Bluehost tolera en esta cuenta).
 
-**Pendiente:** validar en producción con una operación real que los 7 destinatarios internos reciban el correo de forma consistente (no solo algunos), y confirmar cuál es el límite real de conexiones concurrentes que acepta Bluehost para esta cuenta (2 es un valor conservador, no confirmado con el proveedor).
+**Fix aplicado (segunda iteración, 2026-08-04):**
+1. `SMTP_MAX_CONCURRENT_SENDS` default bajado de 2 a **1** (envío completamente serial para destinatarios múltiples).
+2. `sendTransportMail` ahora reintenta automáticamente (`SMTP_CONNECTION_RETRIES`, default 2 reintentos, backoff de 300ms/600ms) cuando el error es de conexión transitorio (`ESOCKET`, `ECONNREFUSED`, `ETIMEDOUT`, `ECONNRESET`) antes de pasar al siguiente host de fallback o fallar definitivamente.
+
+**Pendiente:** validar en producción con una operación real que los 7 destinatarios internos reciban el correo de forma consistente. Si con concurrencia 1 + reintentos sigue fallando, el problema probablemente no es de concurrencia sino de un límite de *tasa* (rate limit) de Bluehost sobre el total de conexiones nuevas por minuto desde esta cuenta/IP, no solo simultáneas — requeriría contactar a soporte de Bluehost para confirmar el límite real, o migrar a un proveedor SMTP transaccional (SendGrid, Postmark, SES) sin este tipo de restricción.
+
+**Nota aparte, no relacionada con este incidente:** durante el diagnóstico se observó que la lista de destinatarios internos reales cambia entre consultas hechas con pocos minutos de diferencia (2 direcciones adicionales aparecieron en los logs de un envío pero no en una consulta posterior) — es comportamiento esperado de una tabla de usuarios de MIREX que el equipo edita activamente en producción, no un bug de esta consulta.
