@@ -178,6 +178,16 @@ interface ClientReviewEmailPayload {
   feedBack?: string | null;
 }
 
+interface OperationUpdateEmailPayload {
+  operationId?: string | null;
+  clientId?: string | null;
+  clientEmail: string;
+  operationCode: string;
+  title: string;
+  summary: string;
+  rows?: Array<{ label: string; value: string | number | null | undefined }>;
+}
+
 export interface ImportadexInternalNotificationPayload {
   operationId?: string | null;
   clientId?: string | null;
@@ -1221,6 +1231,18 @@ export async function sendImportadexClientReviewEmail(payload: ClientReviewEmail
     html: buildBrandedHtml({ title, summary, rows }),
     text: buildPlainText({ title, summary, rows }),
     audience: "client",
+    clientId: payload.clientId,
+  });
+}
+
+export async function sendImportadexClientOperationUpdateEmail(payload: OperationUpdateEmailPayload) {
+  return sendMail({
+    to: payload.clientEmail,
+    subject: `${payload.title} ${payload.operationCode}`,
+    html: buildBrandedHtml({ title: payload.title, summary: payload.summary, rows: payload.rows }),
+    text: buildPlainText({ title: payload.title, summary: payload.summary, rows: payload.rows }),
+    audience: "client",
+    operationId: payload.operationId,
     clientId: payload.clientId,
   });
 }

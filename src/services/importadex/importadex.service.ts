@@ -1,13 +1,16 @@
 import { randomUUID } from "crypto";
 import { prisma } from "../../config/connectionDB";
+import { decrypt } from "../../helpers/encrypted";
 import {
   checkImportadexEmailHealth,
   sendImportadexClientOperationEmail,
+  sendImportadexClientOperationUpdateEmail,
   sendImportadexInternalNotification,
   sendImportadexTestEmail,
 } from "../../helpers/emailManaged";
 import type { ImportadexAuthUser } from "../../middlewares/importadexAdmin";
 import type { UploadedFile } from "../../middlewares/processFiles";
+import { importadexClientService } from "./importadex-client.service";
 
 type DbClient = Pick<typeof prisma, "$queryRawUnsafe" | "$executeRawUnsafe">;
 
@@ -191,6 +194,14 @@ function rowText(row: unknown, key: string) {
   return value === null || value === undefined ? null : String(value);
 }
 
+function safeDecrypt(value: string) {
+  try {
+    return decrypt(value);
+  } catch {
+    return value;
+  }
+}
+
 async function getOperationSummary(operationId: string) {
   const rows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
     `SELECT id, code, client_id, client_name, status, customs_status, created_by_name
@@ -213,20 +224,40 @@ async function notifyOperationEvent(
   if (!operationId) return;
 
   const operation = await getOperationSummary(operationId);
+  const operationCode = rowText(operation, "code") ?? operationId;
+  const detailRows = [
+    { label: "Operacion", value: operationCode },
+    { label: "Cliente", value: rowText(operation, "client_name") },
+    { label: "Estado", value: rowText(operation, "status") },
+    { label: "Aduanas", value: rowText(operation, "customs_status") },
+    ...rows,
+  ];
+
   await sendImportadexInternalNotification({
     operationId,
     clientId: rowText(operation, "client_id"),
     subject,
     title,
     summary,
-    rows: [
-      { label: "Operacion", value: rowText(operation, "code") ?? operationId },
-      { label: "Cliente", value: rowText(operation, "client_name") },
-      { label: "Estado", value: rowText(operation, "status") },
-      { label: "Aduanas", value: rowText(operation, "customs_status") },
-      ...rows,
-    ],
+    rows: detailRows,
   });
+
+  const clientId = rowText(operation, "client_id");
+  if (clientId) {
+    const client = await importadexClientService.getClient(clientId);
+    if (client?.email) {
+      const clientDisplayName = `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`;
+      await sendImportadexClientOperationUpdateEmail({
+        operationId,
+        clientId,
+        clientEmail: client.email,
+        operationCode,
+        title,
+        summary: `Hola ${clientDisplayName}, tu operacion Importadex ${operationCode} tuvo una actualizacion: ${summary}`,
+        rows: detailRows,
+      });
+    }
+  }
 }
 
 function queueEmailTask(label: string, task: () => Promise<unknown>) {
@@ -302,7 +333,7 @@ async function resolveApprovedClient(clientName: unknown) {
   return {
     id: rows[0].id,
     displayName: formatClientDisplayName(rows[0]),
-    email: rows[0].email,
+    email: safeDecrypt(rows[0].email),
   };
 }
 
@@ -723,6 +754,18 @@ export const importadexService = {
         owner: (item as { owner?: string }).owner ?? "system",
         location: (item as { status?: string }).status ?? "OPEN",
       });
+      queueEmailTask("incident-created", () => notifyOperationEvent(
+        "Incidencia Importadex registrada",
+        "Incidencia registrada en operacion Importadex",
+        "Se registro una incidencia en una operacion Importadex.",
+        itemOperationId,
+        [
+          { label: "Tipo", value: (item as { type?: string }).type },
+          { label: "Estado", value: (item as { status?: string }).status ?? "OPEN" },
+          { label: "Responsable", value: (item as { owner?: string }).owner },
+          { label: "Usuario", value: actorName(actor) },
+        ],
+      ));
     }
 
     await audit(
@@ -875,6 +918,18 @@ export const importadexService = {
         owner: (item as { owner?: string }).owner ?? "system",
         location: (item as { status?: string }).status ?? null,
       });
+      queueEmailTask("incident-updated", () => notifyOperationEvent(
+        "Incidencia Importadex actualizada",
+        "Incidencia actualizada en operacion Importadex",
+        "Se actualizo una incidencia de una operacion Importadex.",
+        operationId,
+        [
+          { label: "Tipo", value: (item as { type?: string }).type },
+          { label: "Estado", value: (item as { status?: string }).status },
+          { label: "Responsable", value: (item as { owner?: string }).owner },
+          { label: "Usuario", value: actorName(actor) },
+        ],
+      ));
     }
 
     await audit(
