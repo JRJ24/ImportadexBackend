@@ -192,6 +192,24 @@ interface ClientDocumentUploadEmailPayload {
   fileNames: string[];
 }
 
+interface ClientReviewEmailPayload {
+  clientId?: string | null;
+  clientName: string;
+  clientEmail: string;
+  status: "APPROVED" | "REJECTED";
+  feedBack?: string | null;
+}
+
+interface OperationUpdateEmailPayload {
+  operationId?: string | null;
+  clientId?: string | null;
+  clientEmail: string;
+  operationCode: string;
+  title: string;
+  summary: string;
+  rows?: Array<{ label: string; value: string | number | null | undefined }>;
+}
+
 export interface ImportadexInternalNotificationPayload {
   operationId?: string | null;
   clientId?: string | null;
@@ -355,6 +373,31 @@ const sendTransportMail = async (mailOptions: Record<string, unknown>): Promise<
 
   throw attachSmtpAttempts(lastError, attempts);
 };
+
+const getMaxConcurrentSends = () => numberEnv("SMTP_MAX_CONCURRENT_SENDS", 2);
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      try {
+        results[index] = { status: "fulfilled", value: await task(items[index]) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return results;
+}
 
 let dnsWarningLogged = false;
 
@@ -732,8 +775,10 @@ const sendMail = async ({
     }));
 
     if (privateRecipients) {
-      const results = await Promise.allSettled(
-        recipients.deliverable.map((recipient) =>
+      const results = await mapWithConcurrency(
+        recipients.deliverable,
+        getMaxConcurrentSends(),
+        (recipient) =>
           sendTransportMail({
             from: fromHeader,
             sender: fromAddress,
@@ -753,7 +798,6 @@ const sendMail = async ({
               to: uniqueEmails([recipient, ...auditBcc]),
             },
           }),
-        ),
       );
 
       const logUpdates: Array<Promise<void>> = [];
@@ -1275,6 +1319,39 @@ export async function sendImportadexClientCommitmentEmail(payload: CommitmentEma
       },
     ],
     audience: "client",
+    clientId: payload.clientId,
+  });
+}
+
+export async function sendImportadexClientReviewEmail(payload: ClientReviewEmailPayload) {
+  const approved = payload.status === "APPROVED";
+  const title = approved ? "Registro Importadex aprobado" : "Registro Importadex rechazado";
+  const summary = approved
+    ? `Hola ${payload.clientName}, tu registro en Importadex fue aprobado. Ya puedes iniciar operaciones desde la plataforma.`
+    : `Hola ${payload.clientName}, tu registro en Importadex fue rechazado.${payload.feedBack ? "" : " Contacta a nuestro equipo si necesitas mas informacion."}`;
+  const rows = [
+    { label: "Estado", value: approved ? "Aprobado" : "Rechazado" },
+    ...(payload.feedBack ? [{ label: "Motivo", value: payload.feedBack }] : []),
+  ];
+
+  return sendMail({
+    to: payload.clientEmail,
+    subject: title,
+    html: buildBrandedHtml({ title, summary, rows }),
+    text: buildPlainText({ title, summary, rows }),
+    audience: "client",
+    clientId: payload.clientId,
+  });
+}
+
+export async function sendImportadexClientOperationUpdateEmail(payload: OperationUpdateEmailPayload) {
+  return sendMail({
+    to: payload.clientEmail,
+    subject: `${payload.title} ${payload.operationCode}`,
+    html: buildBrandedHtml({ title: payload.title, summary: payload.summary, rows: payload.rows }),
+    text: buildPlainText({ title: payload.title, summary: payload.summary, rows: payload.rows }),
+    audience: "client",
+    operationId: payload.operationId,
     clientId: payload.clientId,
   });
 }

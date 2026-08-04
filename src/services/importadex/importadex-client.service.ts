@@ -4,6 +4,7 @@ import { decrypt, encrypt } from "../../helpers/encrypted";
 import {
   sendImportadexClientCommitmentEmail,
   sendImportadexClientRegistrationEmails,
+  sendImportadexClientReviewEmail,
   sendImportadexInternalNotification,
 } from "../../helpers/emailManaged";
 import type { ImportadexAuthUser } from "../../middlewares/importadexAdmin";
@@ -500,7 +501,35 @@ export const importadexClientService = {
     if (!rows[0]) return null;
 
     await auditClient("REVIEW", id, { status, feedBack: nullable(feedBack), reviewedBy }, prisma, reviewedBy);
-    return findClientById(id);
+    const client = await findClientById(id);
+
+    if (client) {
+      const displayName = clientDisplayName(client);
+      const approved = status === "APPROVED";
+
+      await sendImportadexClientReviewEmail({
+        clientId: client.id,
+        clientName: displayName,
+        clientEmail: client.email,
+        status,
+        feedBack: client.feedBack,
+      });
+
+      await sendImportadexInternalNotification({
+        clientId: client.id,
+        subject: approved ? "Cliente Importadex aprobado" : "Cliente Importadex rechazado",
+        title: approved ? "Cliente Importadex aprobado" : "Cliente Importadex rechazado",
+        summary: `El cliente ${displayName} fue ${approved ? "aprobado" : "rechazado"}${reviewedBy ? ` por ${reviewedBy}` : ""}.`,
+        rows: [
+          { label: "Cliente", value: displayName },
+          { label: "Estado", value: approved ? "Aprobado" : "Rechazado" },
+          { label: "Motivo", value: client.feedBack },
+          { label: "Revisado por", value: reviewedBy },
+        ],
+      });
+    }
+
+    return client;
   },
 
   async uploadCommitmentDocument(id: string, file?: UploadedFile, actor?: ImportadexAuthUser | null) {
