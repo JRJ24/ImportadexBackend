@@ -102,6 +102,7 @@ EMAILUSER / EMAILPASS / EMAIL_FROM
 SMTP_HOST / SMTP_PORT / SMTP_SECURE / SMTP_USER / SMTP_PASSWORD
 SMTP_FALLBACK_HOSTS
 SMTP_CONNECTION_TIMEOUT_MS / SMTP_GREETING_TIMEOUT_MS / SMTP_SOCKET_TIMEOUT_MS
+SMTP_MAX_CONCURRENT_SENDS   # tope de conexiones SMTP simultaneas al enviar a multiples destinatarios (default 2, ver seccion 12)
 SMTP_ALLOW_LOCAL_RECIPIENTS
 IMPORTADEX_EMAIL_AUDIT_BCC   # BCC de auditoría para emails salientes
 
@@ -246,3 +247,13 @@ No existe pipeline de CI/CD — todo el proceso arriba es manual. Considerar aut
 - Se agregó la llave pública `~/.ssh/id_ed25519` (`manuelr_16@hotmail.com`) a `/root/.ssh/authorized_keys` del droplet `IMPORTADEX-OPS` (ID `571678205`, IP `143.244.147.235`) vía la consola web de DigitalOcean, porque ninguna de las llaves privadas ya presentes en esta Mac (`importadex_id_rsa`, `flypack_deploy_ed25519`, el `id_ed25519` original) coincidía con la llave `SSHOPS` ya registrada en la cuenta de DO para ese droplet. `doctl compute ssh 571678205` ahora funciona de punta a punta.
 - **Fix aplicado y confirmado en producción (2026-08-04):** riesgo de la sección 6.3 (notificaciones internas deshabilitadas). Se copió el valor de `DATABASE_URL` de `/opt/MIREX/MIREXBackend/.env` como `MIREX_DATABASE_URL` en `/opt/MIREX/ImportadexBackend/.env` (backup en `.env.bak.1785873163`), se recreó `api-alt` (`docker compose up -d --force-recreate api-alt`), y se validó con una query de conteo dentro del propio contenedor (misma condición que `getImportadexNotificationUsers()`): 3 `ADMIN` + 5 `OPERACIONES` activos. Las notificaciones internas de nuevas operaciones deberían llegar de nuevo a ese staff.
 - Nota de permisos: el clasificador de auto-mode de Claude Code bloquea por defecto la ejecución de `doctl compute ssh` y cualquier referencia explícita a un archivo de llave privada (`--ssh-key-path`) hacia este droplet. Para permitir lo primero, el usuario agregó `"Bash(doctl compute ssh 571678205)"` y `"Bash(doctl compute ssh 571678205 *)"` a `permissions.allow` en `~/.claude/settings.json` (alcance: usuario global, no versionado). Lo segundo (`--ssh-key-path` explícito) sigue bloqueado — por eso el flujo depende de que el sistema encuentre la llave correcta por descubrimiento automático de SSH (`~/.ssh/id_ed25519` como nombre estándar), no por ruta explícita.
+
+## 12. Incidente: notificaciones internas se pierden de forma intermitente por límite de conexiones SMTP concurrentes (2026-08-04)
+
+**Síntoma reportado:** al crear una operación real en producción, algunos destinatarios internos (`ADMIN`/`OPERACIONES`) recibían el correo y otros no, de forma aparentemente aleatoria (ej. `genesis.delarosa@importadex.do` sí, `laura.ciriaco@importadex.do` no, en la misma operación).
+
+**Causa raíz confirmada (vía `importadex_email_logs` en producción):** `sendMail()` en `src/helpers/emailManaged.ts`, cuando `privateRecipients: true` (usado para `audience: "internal"`), enviaba un correo independiente por cada destinatario **en paralelo** (`Promise.allSettled` sobre todos los destinatarios a la vez), y cada envío abre su propia conexión SMTP nueva contra el mismo buzón (`info@importadex.do` en Bluehost). Con 7-8 destinatarios simultáneos, Bluehost rechaza las conexiones que exceden su límite de conexiones concurrentes por cuenta (`ECONNREFUSED` en el connect, no un error de credenciales ni de destinatario). El log real mostró 5 de 8 conexiones aceptadas y 3 rechazadas, con destinatarios distintos cada vez segun el orden/timing de las conexiones — de ahí la aleatoriedad reportada.
+
+**Fix aplicado:** se agregó `mapWithConcurrency()` en `emailManaged.ts`, que limita cuántos envíos de `sendTransportMail` corren a la vez (por defecto 2, configurable via `SMTP_MAX_CONCURRENT_SENDS`), reemplazando el `Promise.allSettled` sin límite en el branch de `privateRecipients`. No cambia el comportamiento visible (sigue siendo un correo individual por destinatario, mismo log por destinatario) — solo evita saturar el límite de conexiones del hosting.
+
+**Pendiente:** validar en producción con una operación real que los 7 destinatarios internos reciban el correo de forma consistente (no solo algunos), y confirmar cuál es el límite real de conexiones concurrentes que acepta Bluehost para esta cuenta (2 es un valor conservador, no confirmado con el proveedor).

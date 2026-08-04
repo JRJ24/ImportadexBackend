@@ -352,6 +352,31 @@ const sendTransportMail = async (mailOptions: Record<string, unknown>): Promise<
   throw attachSmtpAttempts(lastError, attempts);
 };
 
+const getMaxConcurrentSends = () => numberEnv("SMTP_MAX_CONCURRENT_SENDS", 2);
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      try {
+        results[index] = { status: "fulfilled", value: await task(items[index]) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return results;
+}
+
 let dnsWarningLogged = false;
 
 const getEmailDomain = (email?: string) => email?.split("@")[1]?.trim().toLowerCase();
@@ -728,8 +753,10 @@ const sendMail = async ({
     }));
 
     if (privateRecipients) {
-      const results = await Promise.allSettled(
-        recipients.deliverable.map((recipient) =>
+      const results = await mapWithConcurrency(
+        recipients.deliverable,
+        getMaxConcurrentSends(),
+        (recipient) =>
           sendTransportMail({
             from: fromHeader,
             sender: fromAddress,
@@ -749,7 +776,6 @@ const sendMail = async ({
               to: uniqueEmails([recipient, ...auditBcc]),
             },
           }),
-        ),
       );
 
       const logUpdates: Array<Promise<void>> = [];
