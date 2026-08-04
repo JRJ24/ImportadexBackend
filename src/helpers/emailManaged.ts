@@ -130,6 +130,7 @@ const createTransporter = (config: SmtpConfig) =>
     host: config.host,
     port: config.port,
     secure: config.secure,
+    name: "importadex.do",
     auth: {
       user: config.user,
       pass: config.pass,
