@@ -462,12 +462,28 @@ export const importadexClientService = {
     const client = await findClientById(id);
 
     if (client) {
+      const displayName = clientDisplayName(client);
+      const approved = status === "APPROVED";
+
       await sendImportadexClientReviewEmail({
         clientId: client.id,
-        clientName: clientDisplayName(client),
+        clientName: displayName,
         clientEmail: client.email,
         status,
         feedBack: client.feedBack,
+      });
+
+      await sendImportadexInternalNotification({
+        clientId: client.id,
+        subject: approved ? "Cliente Importadex aprobado" : "Cliente Importadex rechazado",
+        title: approved ? "Cliente Importadex aprobado" : "Cliente Importadex rechazado",
+        summary: `El cliente ${displayName} fue ${approved ? "aprobado" : "rechazado"}${reviewedBy ? ` por ${reviewedBy}` : ""}.`,
+        rows: [
+          { label: "Cliente", value: displayName },
+          { label: "Estado", value: approved ? "Aprobado" : "Rechazado" },
+          { label: "Motivo", value: client.feedBack },
+          { label: "Revisado por", value: reviewedBy },
+        ],
       });
     }
 
