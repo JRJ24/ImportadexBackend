@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importadexClientService = exports.ImportadexClientServiceError = void 0;
+exports.importadexClientService = exports.normalizeIdentification = exports.ImportadexClientServiceError = void 0;
 const crypto_1 = require("crypto");
 const connectionDB_1 = require("../../config/connectionDB");
 const encrypted_1 = require("../../helpers/encrypted");
@@ -22,6 +22,8 @@ const tokenDocumentLabels = {
 const tokenFileFields = Object.keys(tokenDocumentLabels);
 const commitmentFileFieldNames = new Set(["commitmentDocument", "commitment", "cartaCompromiso", "file"]);
 const normalizeEmail = (email) => email.trim().toLowerCase();
+const normalizeIdentification = (identification) => identification.replace(/\D/g, "");
+exports.normalizeIdentification = normalizeIdentification;
 const getHashSecret = () => {
     const secret = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET;
     if (!secret)
@@ -98,6 +100,13 @@ const findClientBySecureEmail = async (email) => {
     const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT id FROM importadex_clients WHERE email_hash = $1 OR email = $2 LIMIT 1`, createEmailHash(normalizedEmail), normalizedEmail);
     return rows[0] ?? null;
 };
+const findClientByIdentification = async (identification) => {
+    const normalizedIdentification = (0, exports.normalizeIdentification)(identification);
+    const rows = await connectionDB_1.prisma.$queryRawUnsafe(`SELECT id FROM importadex_clients
+     WHERE regexp_replace(identification, '[^0-9]', '', 'g') = $1
+     LIMIT 1`, normalizedIdentification);
+    return rows[0] ?? null;
+};
 const findClientById = async (id, db = connectionDB_1.prisma) => {
     const rows = await db.$queryRawUnsafe(`SELECT c.*,
       (SELECT row_to_json(t.*) FROM "importadex_token_DGA" t WHERE t."clientImportadex" = c.id) AS importadex_token_dga
@@ -119,12 +128,28 @@ const buildEmailDocuments = (tokenFiles) => {
 };
 const actorLabel = (actor) => actor?.name ?? actor?.email ?? null;
 const clientDisplayName = (client) => `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`;
+function queueClientEmailTask(label, task) {
+    void task().catch((error) => {
+        console.error("Importadex client email background task failed", {
+            label,
+            message: error instanceof Error ? error.message : "Email background task failed",
+        });
+    });
+}
 exports.importadexClientService = {
     async registerClient(payload, files) {
         const normalizedEmail = normalizeEmail(payload.email);
+        const normalizedIdentification = (0, exports.normalizeIdentification)(payload.identification);
+        if (normalizedIdentification.length < 3) {
+            throw new ImportadexClientServiceError(400, "Identificacion invalida");
+        }
         const existing = await findClientBySecureEmail(normalizedEmail);
         if (existing) {
             throw new ImportadexClientServiceError(409, "Ya existe un cliente con ese correo");
+        }
+        const existingIdentification = await findClientByIdentification(normalizedIdentification);
+        if (existingIdentification) {
+            throw new ImportadexClientServiceError(409, "Ya existe un cliente con esa identificacion");
         }
         const tokenFiles = payload.hasDgaToken ? null : getTokenFiles(files);
         const encryptedEmail = (0, encrypted_1.encrypt)(normalizedEmail);
@@ -136,7 +161,7 @@ exports.importadexClientService = {
           gender, birth_date, phone_home_office, phone_personal, email, email_hash,
           "feedBack", active, review_status, created_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, true, 'PENDING', CURRENT_TIMESTAMP)
-        RETURNING *`, clientId, payload.type, payload.name.trim(), nullable(payload.lastName), payload.adress.trim(), payload.typeIdentification, payload.identification.trim(), nullable(payload.gender), nullable(payload.birthDate), payload.phoneHomeOffice.trim(), nullable(payload.phonePersonal), encryptedEmail, emailHash, nullable(payload.feedBack));
+        RETURNING *`, clientId, payload.type, payload.name.trim(), nullable(payload.lastName), payload.adress.trim(), payload.typeIdentification, normalizedIdentification, nullable(payload.gender), nullable(payload.birthDate), payload.phoneHomeOffice.trim(), nullable(payload.phonePersonal), encryptedEmail, emailHash, nullable(payload.feedBack));
             if (tokenFiles) {
                 await tx.$executeRawUnsafe(`INSERT INTO "importadex_token_DGA" (
             id, "clientImportadex", current_commercial_registry,
@@ -149,7 +174,7 @@ exports.importadexClientService = {
         if (!client) {
             throw new ImportadexClientServiceError(500, "No se pudo registrar el cliente");
         }
-        const notification = await (0, emailManaged_1.sendImportadexClientRegistrationEmails)({
+        queueClientEmailTask("client-registration", () => (0, emailManaged_1.sendImportadexClientRegistrationEmails)({
             clientId: client.id,
             clientName: `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`,
             clientEmail: client.email,
@@ -157,8 +182,8 @@ exports.importadexClientService = {
             identification: client.identification,
             hasDgaToken: payload.hasDgaToken,
             tokenDocuments: buildEmailDocuments(tokenFiles),
-        });
-        return { client, notification };
+        }));
+        return { client, notification: { queued: true } };
     },
     async createClientByAdmin(payload, files, actor) {
         const commitmentFile = getCommitmentFile(files);
@@ -167,9 +192,17 @@ exports.importadexClientService = {
         }
         assertPdfFile(commitmentFile);
         const normalizedEmail = normalizeEmail(payload.email);
+        const normalizedIdentification = (0, exports.normalizeIdentification)(payload.identification);
+        if (normalizedIdentification.length < 3) {
+            throw new ImportadexClientServiceError(400, "Identificacion invalida");
+        }
         const existing = await findClientBySecureEmail(normalizedEmail);
         if (existing) {
             throw new ImportadexClientServiceError(409, "Ya existe un cliente con ese correo");
+        }
+        const existingIdentification = await findClientByIdentification(normalizedIdentification);
+        if (existingIdentification) {
+            throw new ImportadexClientServiceError(409, "Ya existe un cliente con esa identificacion");
         }
         const tokenFiles = payload.hasDgaToken ? null : getTokenFiles(files);
         const encryptedEmail = (0, encrypted_1.encrypt)(normalizedEmail);
@@ -183,7 +216,7 @@ exports.importadexClientService = {
           "feedBack", commitment_document_url, commitment_document_name, active,
           review_status, reviewed_at, reviewed_by, created_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true, 'APPROVED', CURRENT_TIMESTAMP, $17, CURRENT_TIMESTAMP)
-        RETURNING *`, clientId, payload.type, payload.name.trim(), nullable(payload.lastName), payload.adress.trim(), payload.typeIdentification, payload.identification.trim(), nullable(payload.gender), nullable(payload.birthDate), payload.phoneHomeOffice.trim(), nullable(payload.phonePersonal), encryptedEmail, emailHash, nullable(payload.feedBack), commitmentFile.url, commitmentFile.originalName || commitmentFile.fileName, reviewer);
+        RETURNING *`, clientId, payload.type, payload.name.trim(), nullable(payload.lastName), payload.adress.trim(), payload.typeIdentification, normalizedIdentification, nullable(payload.gender), nullable(payload.birthDate), payload.phoneHomeOffice.trim(), nullable(payload.phonePersonal), encryptedEmail, emailHash, nullable(payload.feedBack), commitmentFile.url, commitmentFile.originalName || commitmentFile.fileName, reviewer);
             if (tokenFiles) {
                 await tx.$executeRawUnsafe(`INSERT INTO "importadex_token_DGA" (
             id, "clientImportadex", current_commercial_registry,

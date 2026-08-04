@@ -4,21 +4,23 @@ exports.initializeSocket = void 0;
 const socket_io_1 = require("socket.io");
 const origin = process.env.NODE_ENV === "PROD"
     ? process.env.URL_FRONTEND
-    : "http://localhost:5173/";
+    : process.env.URL_FRONTEND || "http://localhost:5173";
+const allowedOrigins = origin?.split(/[,;\s]+/).filter(Boolean);
 const initializeSocket = (server) => {
     const io = new socket_io_1.Server(server, {
         cors: {
-            origin: origin,
+            origin: allowedOrigins?.length ? allowedOrigins : true,
             credentials: true,
         },
     });
     io.on("connection", (socket) => {
-        // socket.on("join-private-room", (userEmail: string) => {
-        //   socket.join(userEmail);
-        // });
-        // socket.on("New-Comment", (data) => {
-        //   io.emit("Comment-Received", data);
-        // });
+        socket.on("importadex:join-operations", () => {
+            socket.join("importadex:operations");
+        });
+        socket.on("importadex:join-client", (clientId) => {
+            if (clientId)
+                socket.join(`importadex:client:${clientId}`);
+        });
     });
     return io;
 };

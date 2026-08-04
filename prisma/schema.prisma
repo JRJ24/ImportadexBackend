@@ -292,8 +292,24 @@ model ImportadexClient {
   importadexTokenDGA ImportadexTokenDGA?
   operations         ImportadexOperation[]
   emailLogs          ImportadexEmailLog[]
+  portalOtps         ImportadexClientPortalOtp[]
 
   @@map("importadex_clients")
+}
+
+model ImportadexClientPortalOtp {
+  id        String           @id @default(cuid())
+  clientId  String           @map("client_id")
+  codeHash  String           @map("code_hash")
+  attempts  Int              @default(0)
+  expiresAt DateTime         @map("expires_at")
+  usedAt    DateTime?        @map("used_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+  client    ImportadexClient @relation(fields: [clientId], references: [id])
+
+  @@index([clientId, createdAt], map: "importadex_client_portal_otps_client_created_idx")
+  @@index([expiresAt], map: "importadex_client_portal_otps_expires_idx")
+  @@map("importadex_client_portal_otps")
 }
 
 model ImportadexEmailLog {

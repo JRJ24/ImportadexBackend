@@ -201,3 +201,16 @@ export const importadexCatalogOptionSchema = z.object({
 export const importadexEmailTestSchema = z.object({
   to: z.string().trim().email().transform((email) => email.toLowerCase()),
 });
+
+export const importadexClientPortalLoginSchema = z.object({
+  identification: z.string().trim().min(3),
+});
+
+export const importadexClientPortalOtpSchema = z.object({
+  identification: z.string().trim().min(3),
+  code: z.string().trim().regex(/^\d{6}$/, "Codigo OTP invalido"),
+});
+
+export const importadexClientPortalAttachmentSchema = z.object({
+  documentId: z.string().trim().min(1).optional().nullable(),
+});

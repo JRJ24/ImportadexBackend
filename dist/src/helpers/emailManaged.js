@@ -8,6 +8,8 @@ exports.checkImportadexEmailHealth = checkImportadexEmailHealth;
 exports.sendImportadexInternalNotification = sendImportadexInternalNotification;
 exports.sendImportadexClientRegistrationEmails = sendImportadexClientRegistrationEmails;
 exports.sendImportadexClientOperationEmail = sendImportadexClientOperationEmail;
+exports.sendImportadexClientPortalOtpEmail = sendImportadexClientPortalOtpEmail;
+exports.sendImportadexClientDocumentUploadEmail = sendImportadexClientDocumentUploadEmail;
 exports.sendImportadexTestEmail = sendImportadexTestEmail;
 exports.sendImportadexClientCommitmentEmail = sendImportadexClientCommitmentEmail;
 const nodemailer_1 = __importDefault(require("nodemailer"));
@@ -41,10 +43,11 @@ const getSmtpPassword = () => process.env.SMTP_PASSWORD || process.env.EMAILPASS
 const getSmtpHost = () => process.env.SMTP_HOST ||
     (getSmtpUser()?.toLowerCase().endsWith("@gmail.com") ? "smtp.gmail.com" : undefined);
 const getEmailFrom = () => process.env.EMAIL_FROM || getSmtpUser();
+const isSmtpFallbackEnabled = () => parseBoolean(process.env.SMTP_ENABLE_FALLBACKS, !process.env.SMTP_HOST);
 const smtpTimeouts = () => ({
-    connectionTimeout: numberEnv("SMTP_CONNECTION_TIMEOUT_MS", 10_000),
-    greetingTimeout: numberEnv("SMTP_GREETING_TIMEOUT_MS", 10_000),
-    socketTimeout: numberEnv("SMTP_SOCKET_TIMEOUT_MS", 20_000),
+    connectionTimeout: numberEnv("SMTP_CONNECTION_TIMEOUT_MS", 5_000),
+    greetingTimeout: numberEnv("SMTP_GREETING_TIMEOUT_MS", 5_000),
+    socketTimeout: numberEnv("SMTP_SOCKET_TIMEOUT_MS", 10_000),
 });
 const formatSmtpConfig = (config) => config ? `${config.host}:${config.port}:${config.secure ? "secure" : "starttls"}:${config.source}` : null;
 const getPrimarySmtpConfig = () => {
@@ -81,10 +84,11 @@ const getSmtpConfigs = () => {
     if (!primary)
         return [];
     const configs = [primary];
-    if (primary.port !== 587) {
+    const fallbackEnabled = isSmtpFallbackEnabled();
+    if (fallbackEnabled && primary.port !== 587) {
         configs.push({ ...primary, port: 587, secure: false, source: "fallback-587" });
     }
-    if (primary.host.toLowerCase() === "mail.importadex.do") {
+    if (fallbackEnabled && primary.host.toLowerCase() === "mail.importadex.do") {
         configs.push({ ...primary, host: "box2419.bluehost.com", port: 465, secure: true, source: "bluehost-box-465" });
         configs.push({ ...primary, host: "box2419.bluehost.com", port: 587, secure: false, source: "bluehost-box-587" });
     }
@@ -744,7 +748,11 @@ async function sendImportadexInternalNotification(payload) {
         console.error("Importadex notification recipients lookup failed", error);
         return { sent: false, skipped: true, internalRecipients: 0 };
     }
-    const recipients = uniqueEmails(users.map((user) => user.email));
+    const recipients = uniqueEmails([
+        ...users.map((user) => user.email),
+        ...parseEmailList(process.env.IMPORTADEX_NOTIFY_EMAILS),
+        ...parseEmailList(process.env.IMPORTADEX_ADMIN_EMAILS),
+    ]);
     if (!recipients.length) {
         return { sent: false, skipped: true, internalRecipients: 0 };
     }
@@ -840,6 +848,60 @@ async function sendImportadexClientOperationEmail(payload) {
             rows,
         }),
         audience: "client",
+        operationId: payload.operationId,
+        clientId: payload.clientId,
+    });
+}
+async function sendImportadexClientPortalOtpEmail(payload) {
+    return sendMail({
+        to: payload.clientEmail,
+        subject: "Codigo de acceso Portal Importadex",
+        html: buildBrandedHtml({
+            title: "Codigo de acceso al portal",
+            summary: `Hola ${payload.clientName}, usa este codigo para ingresar al portal de clientes Importadex. Expira en ${payload.expiresInMinutes} minutos.`,
+            rows: [
+                { label: "Identificacion", value: payload.identification },
+                { label: "Codigo", value: payload.code },
+                { label: "Vigencia", value: `${payload.expiresInMinutes} minutos` },
+            ],
+        }),
+        text: buildPlainText({
+            title: "Codigo de acceso al portal",
+            summary: `Hola ${payload.clientName}, usa este codigo para ingresar al portal de clientes Importadex. Expira en ${payload.expiresInMinutes} minutos.`,
+            rows: [
+                { label: "Identificacion", value: payload.identification },
+                { label: "Codigo", value: payload.code },
+                { label: "Vigencia", value: `${payload.expiresInMinutes} minutos` },
+            ],
+        }),
+        audience: "client-portal-otp",
+        clientId: payload.clientId,
+    });
+}
+async function sendImportadexClientDocumentUploadEmail(payload) {
+    const fileList = payload.fileNames.join(", ");
+    return sendMail({
+        to: payload.clientEmail,
+        subject: `Documento recibido Importadex ${payload.operationCode}`,
+        html: buildBrandedHtml({
+            title: "Documento recibido correctamente",
+            summary: `Hola ${payload.clientName}, recibimos tu archivo en el portal Importadex. Nuestro equipo de operaciones revisara la documentacion y continuara el proceso.`,
+            rows: [
+                { label: "Operacion", value: payload.operationCode },
+                { label: "Documento", value: payload.documentName },
+                { label: "Archivos", value: fileList },
+            ],
+        }),
+        text: buildPlainText({
+            title: "Documento recibido correctamente",
+            summary: `Hola ${payload.clientName}, recibimos tu archivo en el portal Importadex. Nuestro equipo de operaciones revisara la documentacion y continuara el proceso.`,
+            rows: [
+                { label: "Operacion", value: payload.operationCode },
+                { label: "Documento", value: payload.documentName },
+                { label: "Archivos", value: fileList },
+            ],
+        }),
+        audience: "client-document-upload",
         operationId: payload.operationId,
         clientId: payload.clientId,
     });

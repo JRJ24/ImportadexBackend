@@ -55,6 +55,7 @@ const tokenFileFields = Object.keys(tokenDocumentLabels) as TokenFileField[];
 const commitmentFileFieldNames = new Set(["commitmentDocument", "commitment", "cartaCompromiso", "file"]);
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
+export const normalizeIdentification = (identification: string) => identification.replace(/\D/g, "");
 
 const getHashSecret = () => {
   const secret = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET;
@@ -158,6 +159,18 @@ const findClientBySecureEmail = async (email: string) => {
   return rows[0] ?? null;
 };
 
+const findClientByIdentification = async (identification: string) => {
+  const normalizedIdentification = normalizeIdentification(identification);
+  const rows = await prisma.$queryRawUnsafe<Row[]>(
+    `SELECT id FROM importadex_clients
+     WHERE regexp_replace(identification, '[^0-9]', '', 'g') = $1
+     LIMIT 1`,
+    normalizedIdentification,
+  );
+
+  return rows[0] ?? null;
+};
+
 const findClientById = async (id: string, db: DbClient = prisma) => {
   const rows = await db.$queryRawUnsafe<Row[]>(
     `SELECT c.*,
@@ -202,13 +215,32 @@ const actorLabel = (actor?: ImportadexAuthUser | null) => actor?.name ?? actor?.
 const clientDisplayName = (client: { name: string; lastName?: string | null }) =>
   `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`;
 
+function queueClientEmailTask(label: string, task: () => Promise<unknown>) {
+  void task().catch((error) => {
+    console.error("Importadex client email background task failed", {
+      label,
+      message: error instanceof Error ? error.message : "Email background task failed",
+    });
+  });
+}
+
 export const importadexClientService = {
   async registerClient(payload: ImportadexClientRegistrationPayload, files: UploadedFile[]) {
     const normalizedEmail = normalizeEmail(payload.email);
+    const normalizedIdentification = normalizeIdentification(payload.identification);
+    if (normalizedIdentification.length < 3) {
+      throw new ImportadexClientServiceError(400, "Identificacion invalida");
+    }
+
     const existing = await findClientBySecureEmail(normalizedEmail);
 
     if (existing) {
       throw new ImportadexClientServiceError(409, "Ya existe un cliente con ese correo");
+    }
+
+    const existingIdentification = await findClientByIdentification(normalizedIdentification);
+    if (existingIdentification) {
+      throw new ImportadexClientServiceError(409, "Ya existe un cliente con esa identificacion");
     }
 
     const tokenFiles = payload.hasDgaToken ? null : getTokenFiles(files);
@@ -230,7 +262,7 @@ export const importadexClientService = {
         nullable(payload.lastName),
         payload.adress.trim(),
         payload.typeIdentification,
-        payload.identification.trim(),
+        normalizedIdentification,
         nullable(payload.gender),
         nullable(payload.birthDate),
         payload.phoneHomeOffice.trim(),
@@ -269,7 +301,7 @@ export const importadexClientService = {
       throw new ImportadexClientServiceError(500, "No se pudo registrar el cliente");
     }
 
-    const notification = await sendImportadexClientRegistrationEmails({
+    queueClientEmailTask("client-registration", () => sendImportadexClientRegistrationEmails({
       clientId: client.id,
       clientName: `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`,
       clientEmail: client.email,
@@ -277,9 +309,9 @@ export const importadexClientService = {
       identification: client.identification,
       hasDgaToken: payload.hasDgaToken,
       tokenDocuments: buildEmailDocuments(tokenFiles),
-    });
+    }));
 
-    return { client, notification };
+    return { client, notification: { queued: true } };
   },
 
   async createClientByAdmin(payload: ImportadexClientRegistrationPayload, files: UploadedFile[], actor?: ImportadexAuthUser | null) {
@@ -290,10 +322,20 @@ export const importadexClientService = {
     assertPdfFile(commitmentFile);
 
     const normalizedEmail = normalizeEmail(payload.email);
+    const normalizedIdentification = normalizeIdentification(payload.identification);
+    if (normalizedIdentification.length < 3) {
+      throw new ImportadexClientServiceError(400, "Identificacion invalida");
+    }
+
     const existing = await findClientBySecureEmail(normalizedEmail);
 
     if (existing) {
       throw new ImportadexClientServiceError(409, "Ya existe un cliente con ese correo");
+    }
+
+    const existingIdentification = await findClientByIdentification(normalizedIdentification);
+    if (existingIdentification) {
+      throw new ImportadexClientServiceError(409, "Ya existe un cliente con esa identificacion");
     }
 
     const tokenFiles = payload.hasDgaToken ? null : getTokenFiles(files);
@@ -317,7 +359,7 @@ export const importadexClientService = {
         nullable(payload.lastName),
         payload.adress.trim(),
         payload.typeIdentification,
-        payload.identification.trim(),
+        normalizedIdentification,
         nullable(payload.gender),
         nullable(payload.birthDate),
         payload.phoneHomeOffice.trim(),

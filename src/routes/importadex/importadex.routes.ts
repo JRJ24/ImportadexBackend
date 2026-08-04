@@ -1,12 +1,21 @@
 import { Router } from "express";
+import { importadexClientPortalController } from "../../controllers/importadex/importadex-client-portal.controller";
 import { importadexClientController } from "../../controllers/importadex/importadex-client.controller";
 import { importadexController } from "../../controllers/importadex/importadex.controller";
 import { attachImportadexUser, requireImportadexAdmin } from "../../middlewares/importadexAdmin";
+import { loginRateLimit } from "../../middlewares/loginRateLimit";
 import { processFile } from "../../middlewares/processFiles";
 
 const router = Router();
 
 router.use(attachImportadexUser);
+
+router.post("/client-portal/login", loginRateLimit, importadexClientPortalController.requestLogin);
+router.post("/client-portal/verify-otp", loginRateLimit, importadexClientPortalController.verifyOtp);
+router.get("/client-portal/me", importadexClientPortalController.me);
+router.get("/client-portal/operations", importadexClientPortalController.listOperations);
+router.get("/client-portal/operations/:id", importadexClientPortalController.getOperation);
+router.post("/client-portal/operations/:id/attachments", processFile, importadexClientPortalController.uploadAttachments);
 
 router.get("/operations", importadexController.listOperations);
 router.post("/operations", importadexController.createOperation);

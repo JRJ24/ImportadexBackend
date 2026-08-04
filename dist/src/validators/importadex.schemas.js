@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importadexEmailTestSchema = exports.importadexCatalogOptionSchema = exports.importadexClientReviewSchema = exports.importadexClientRegisterSchema = exports.patchSchemas = exports.attachmentSchema = exports.documentSchema = exports.incidentSchema = exports.customsFileSchema = exports.containerSchema = exports.commentSchema = exports.eventSchema = exports.statusSchema = exports.operationPatchSchema = exports.operationSchema = void 0;
+exports.importadexClientPortalAttachmentSchema = exports.importadexClientPortalOtpSchema = exports.importadexClientPortalLoginSchema = exports.importadexEmailTestSchema = exports.importadexCatalogOptionSchema = exports.importadexClientReviewSchema = exports.importadexClientRegisterSchema = exports.patchSchemas = exports.attachmentSchema = exports.documentSchema = exports.incidentSchema = exports.customsFileSchema = exports.containerSchema = exports.commentSchema = exports.eventSchema = exports.statusSchema = exports.operationPatchSchema = exports.operationSchema = void 0;
 const zod_1 = require("zod");
 const formBoolean = zod_1.z.preprocess((value) => {
     if (typeof value === "boolean")
@@ -186,4 +186,14 @@ exports.importadexCatalogOptionSchema = zod_1.z.object({
 });
 exports.importadexEmailTestSchema = zod_1.z.object({
     to: zod_1.z.string().trim().email().transform((email) => email.toLowerCase()),
+});
+exports.importadexClientPortalLoginSchema = zod_1.z.object({
+    identification: zod_1.z.string().trim().min(3),
+});
+exports.importadexClientPortalOtpSchema = zod_1.z.object({
+    identification: zod_1.z.string().trim().min(3),
+    code: zod_1.z.string().trim().regex(/^\d{6}$/, "Codigo OTP invalido"),
+});
+exports.importadexClientPortalAttachmentSchema = zod_1.z.object({
+    documentId: zod_1.z.string().trim().min(1).optional().nullable(),
 });
