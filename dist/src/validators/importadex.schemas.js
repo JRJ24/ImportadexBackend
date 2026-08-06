@@ -174,6 +174,7 @@ exports.importadexClientRegisterSchema = zod_1.z.object({
     phoneHomeOffice: zod_1.z.string().trim().min(3),
     phonePersonal: zod_1.z.string().trim().optional().nullable(),
     email: zod_1.z.string().trim().email().transform((email) => email.toLowerCase()),
+    discoverySource: zod_1.z.string().trim().optional().nullable(),
     feedBack: zod_1.z.string().trim().optional().nullable(),
     hasDgaToken: formBoolean,
 });
@@ -181,7 +182,7 @@ exports.importadexClientReviewSchema = zod_1.z.object({
     feedBack: zod_1.z.string().trim().optional().nullable(),
 });
 exports.importadexCatalogOptionSchema = zod_1.z.object({
-    group: zod_1.z.enum(["origin", "destination", "port_airport", "carrier", "customs_status", "document_type"]),
+    group: zod_1.z.enum(["origin", "destination", "port_airport", "carrier", "customs_status", "document_type", "client_source"]),
     label: zod_1.z.string().trim().min(2),
 });
 exports.importadexEmailTestSchema = zod_1.z.object({

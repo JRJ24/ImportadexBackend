@@ -71,6 +71,27 @@ const getDecodedUser = (decoded: ImportadexAdminToken): ImportadexAuthUser => ({
   role: decoded.data?.role ?? decoded.role,
 });
 
+const normalizeAccessValue = (value?: string | null) =>
+  (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+
+const importadexInstitutionKey = normalizeAccessValue("Importadex / Flypack");
+
+const isImportadexInstitution = (institution?: string | null) =>
+  normalizeAccessValue(institution) === importadexInstitutionKey;
+
+const isImportadexAdminRole = (role?: string) =>
+  Boolean(role && ["ADMIN", "IMPORTADEX_ADMIN"].includes(role));
+
+const canManageImportadexClients = (user: ImportadexAuthUser) => {
+  const role = user.role;
+  if (isImportadexAdminRole(role)) return true;
+  return role === "OPERACIONES" && isImportadexInstitution(user.institution);
+};
+
 const mapMirexUser = (user: MirexUserSummary): ImportadexAuthUser => ({
   id: user.id,
   email: user.email,
@@ -124,6 +145,30 @@ export const requireImportadexAdmin = async (req: Request, res: Response, next: 
     const role = user.role;
 
     if (!role || !["ADMIN", "IMPORTADEX_ADMIN"].includes(role)) {
+      res.status(403).json({ ok: false, message: "Forbidden" });
+      return;
+    }
+
+    req.importadexUser = user;
+    next();
+  } catch {
+    res.status(401).json({ ok: false, message: "Unauthorized" });
+  }
+};
+
+export const requireImportadexClientManager = async (req: Request, res: Response, next: NextFunction) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    res.status(401).json({ ok: false, message: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const decoded = verifyToken(token);
+    const user = await resolveMirexUser(getDecodedUser(decoded));
+
+    if (!canManageImportadexClients(user)) {
       res.status(403).json({ ok: false, message: "Forbidden" });
       return;
     }

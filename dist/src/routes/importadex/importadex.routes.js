@@ -28,13 +28,13 @@ router.get("/operations/:id/attachments", importadex_controller_1.importadexCont
 router.post("/operations/:id/attachments", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
 router.post("/attachments/upload", processFiles_1.processFile, importadex_controller_1.importadexController.uploadOperationAttachments);
 router.post("/clients/register", processFiles_1.processFile, importadex_client_controller_1.importadexClientController.register);
-router.post("/clients", importadexAdmin_1.requireImportadexAdmin, processFiles_1.processFile, importadex_client_controller_1.importadexClientController.createByAdmin);
+router.post("/clients", importadexAdmin_1.requireImportadexClientManager, processFiles_1.processFile, importadex_client_controller_1.importadexClientController.createByAdmin);
 router.get("/clients/select", importadex_client_controller_1.importadexClientController.listApprovedOptions);
-router.get("/clients", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.list);
-router.get("/clients/:id", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.get);
-router.patch("/clients/:id/approve", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.approve);
-router.patch("/clients/:id/reject", importadexAdmin_1.requireImportadexAdmin, importadex_client_controller_1.importadexClientController.reject);
-router.post("/clients/:id/commitment", importadexAdmin_1.requireImportadexAdmin, processFiles_1.processFile, importadex_client_controller_1.importadexClientController.uploadCommitment);
+router.get("/clients", importadexAdmin_1.requireImportadexClientManager, importadex_client_controller_1.importadexClientController.list);
+router.get("/clients/:id", importadexAdmin_1.requireImportadexClientManager, importadex_client_controller_1.importadexClientController.get);
+router.patch("/clients/:id/approve", importadexAdmin_1.requireImportadexClientManager, importadex_client_controller_1.importadexClientController.approve);
+router.patch("/clients/:id/reject", importadexAdmin_1.requireImportadexClientManager, importadex_client_controller_1.importadexClientController.reject);
+router.post("/clients/:id/commitment", importadexAdmin_1.requireImportadexClientManager, processFiles_1.processFile, importadex_client_controller_1.importadexClientController.uploadCommitment);
 for (const key of ["containers", "customs-files", "incidents", "documents", "attachments"]) {
     const handlers = importadex_controller_1.importadexController.tableHandlers(key);
     router.get(`/${key}`, handlers.list);

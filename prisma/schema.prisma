@@ -281,6 +281,7 @@ model ImportadexClient {
   phonePersonal      String?                      @map("phone_personal")
   email              String                       @unique
   emailHash          String?                      @unique @map("email_hash")
+  discoverySource    String?                      @map("discovery_source")
   feedBack           String?                      @map("feedBack")
   commitmentDocumentUrl  String?                  @map("commitment_document_url")
   commitmentDocumentName String?                  @map("commitment_document_name")

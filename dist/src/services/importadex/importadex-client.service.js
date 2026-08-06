@@ -69,6 +69,7 @@ const mapClient = (row) => ({
     phoneHomeOffice: stringValue(row.phone_home_office),
     phonePersonal: stringValue(row.phone_personal) || null,
     email: safeDecrypt(stringValue(row.email)),
+    discoverySource: stringValue(row.discovery_source ?? row.discoverySource) || null,
     feedBack: stringValue(row.feedBack ?? row.feedback) || null,
     commitmentDocumentUrl: stringValue(row.commitment_document_url) || null,
     commitmentDocumentName: stringValue(row.commitment_document_name) || null,
@@ -128,6 +129,7 @@ const buildEmailDocuments = (tokenFiles) => {
 };
 const actorLabel = (actor) => actor?.name ?? actor?.email ?? null;
 const clientDisplayName = (client) => `${client.name}${client.lastName ? ` ${client.lastName}` : ""}`;
+const getDiscoverySource = (payload) => nullable(payload.discoverySource ?? payload.feedBack);
 function queueClientEmailTask(label, task) {
     void task().catch((error) => {
         console.error("Importadex client email background task failed", {
@@ -159,9 +161,9 @@ exports.importadexClientService = {
             const clientRows = await tx.$queryRawUnsafe(`INSERT INTO importadex_clients (
           id, type, name, last_name, adress, type_identification, identification,
           gender, birth_date, phone_home_office, phone_personal, email, email_hash,
-          "feedBack", active, review_status, created_at
+          discovery_source, active, review_status, created_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, true, 'PENDING', CURRENT_TIMESTAMP)
-        RETURNING *`, clientId, payload.type, payload.name.trim(), nullable(payload.lastName), payload.adress.trim(), payload.typeIdentification, normalizedIdentification, nullable(payload.gender), nullable(payload.birthDate), payload.phoneHomeOffice.trim(), nullable(payload.phonePersonal), encryptedEmail, emailHash, nullable(payload.feedBack));
+        RETURNING *`, clientId, payload.type, payload.name.trim(), nullable(payload.lastName), payload.adress.trim(), payload.typeIdentification, normalizedIdentification, nullable(payload.gender), nullable(payload.birthDate), payload.phoneHomeOffice.trim(), nullable(payload.phonePersonal), encryptedEmail, emailHash, getDiscoverySource(payload));
             if (tokenFiles) {
                 await tx.$executeRawUnsafe(`INSERT INTO "importadex_token_DGA" (
             id, "clientImportadex", current_commercial_registry,
@@ -213,10 +215,10 @@ exports.importadexClientService = {
             const clientRows = await tx.$queryRawUnsafe(`INSERT INTO importadex_clients (
           id, type, name, last_name, adress, type_identification, identification,
           gender, birth_date, phone_home_office, phone_personal, email, email_hash,
-          "feedBack", commitment_document_url, commitment_document_name, active,
+          discovery_source, commitment_document_url, commitment_document_name, active,
           review_status, reviewed_at, reviewed_by, created_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true, 'APPROVED', CURRENT_TIMESTAMP, $17, CURRENT_TIMESTAMP)
-        RETURNING *`, clientId, payload.type, payload.name.trim(), nullable(payload.lastName), payload.adress.trim(), payload.typeIdentification, normalizedIdentification, nullable(payload.gender), nullable(payload.birthDate), payload.phoneHomeOffice.trim(), nullable(payload.phonePersonal), encryptedEmail, emailHash, nullable(payload.feedBack), commitmentFile.url, commitmentFile.originalName || commitmentFile.fileName, reviewer);
+        RETURNING *`, clientId, payload.type, payload.name.trim(), nullable(payload.lastName), payload.adress.trim(), payload.typeIdentification, normalizedIdentification, nullable(payload.gender), nullable(payload.birthDate), payload.phoneHomeOffice.trim(), nullable(payload.phonePersonal), encryptedEmail, emailHash, getDiscoverySource(payload), commitmentFile.url, commitmentFile.originalName || commitmentFile.fileName, reviewer);
             if (tokenFiles) {
                 await tx.$executeRawUnsafe(`INSERT INTO "importadex_token_DGA" (
             id, "clientImportadex", current_commercial_registry,

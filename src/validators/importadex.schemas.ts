@@ -185,6 +185,7 @@ export const importadexClientRegisterSchema = z.object({
   phoneHomeOffice: z.string().trim().min(3),
   phonePersonal: z.string().trim().optional().nullable(),
   email: z.string().trim().email().transform((email) => email.toLowerCase()),
+  discoverySource: z.string().trim().optional().nullable(),
   feedBack: z.string().trim().optional().nullable(),
   hasDgaToken: formBoolean,
 });
@@ -194,7 +195,7 @@ export const importadexClientReviewSchema = z.object({
 });
 
 export const importadexCatalogOptionSchema = z.object({
-  group: z.enum(["origin", "destination", "port_airport", "carrier", "customs_status", "document_type"]),
+  group: z.enum(["origin", "destination", "port_airport", "carrier", "customs_status", "document_type", "client_source"]),
   label: z.string().trim().min(2),
 });
 

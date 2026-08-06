@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.requireImportadexAdmin = exports.attachImportadexUser = void 0;
+exports.requireImportadexClientManager = exports.requireImportadexAdmin = exports.attachImportadexUser = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mirex_users_service_1 = require("../services/mirex-users.service");
 const getJwtSecrets = () => {
@@ -43,6 +43,20 @@ const getDecodedUser = (decoded) => ({
     email: decoded.data?.email ?? decoded.email,
     role: decoded.data?.role ?? decoded.role,
 });
+const normalizeAccessValue = (value) => (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+const importadexInstitutionKey = normalizeAccessValue("Importadex / Flypack");
+const isImportadexInstitution = (institution) => normalizeAccessValue(institution) === importadexInstitutionKey;
+const isImportadexAdminRole = (role) => Boolean(role && ["ADMIN", "IMPORTADEX_ADMIN"].includes(role));
+const canManageImportadexClients = (user) => {
+    const role = user.role;
+    if (isImportadexAdminRole(role))
+        return true;
+    return role === "OPERACIONES" && isImportadexInstitution(user.institution);
+};
 const mapMirexUser = (user) => ({
     id: user.id,
     email: user.email,
@@ -101,3 +115,24 @@ const requireImportadexAdmin = async (req, res, next) => {
     }
 };
 exports.requireImportadexAdmin = requireImportadexAdmin;
+const requireImportadexClientManager = async (req, res, next) => {
+    const token = getTokenFromRequest(req);
+    if (!token) {
+        res.status(401).json({ ok: false, message: "Unauthorized" });
+        return;
+    }
+    try {
+        const decoded = verifyToken(token);
+        const user = await resolveMirexUser(getDecodedUser(decoded));
+        if (!canManageImportadexClients(user)) {
+            res.status(403).json({ ok: false, message: "Forbidden" });
+            return;
+        }
+        req.importadexUser = user;
+        next();
+    }
+    catch {
+        res.status(401).json({ ok: false, message: "Unauthorized" });
+    }
+};
+exports.requireImportadexClientManager = requireImportadexClientManager;

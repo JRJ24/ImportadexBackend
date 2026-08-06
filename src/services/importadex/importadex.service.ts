@@ -24,7 +24,8 @@ export type CatalogOptionGroup =
   | "port_airport"
   | "carrier"
   | "customs_status"
-  | "document_type";
+  | "document_type"
+  | "client_source";
 
 export class ImportadexServiceError extends Error {
   constructor(
@@ -112,6 +113,7 @@ const catalogOptionGroups = new Set<CatalogOptionGroup>([
   "carrier",
   "customs_status",
   "document_type",
+  "client_source",
 ]);
 
 function normalizeCatalogValue(label: string) {
@@ -960,6 +962,7 @@ export const importadexService = {
         UNION SELECT 'customs_status' AS "group", customs_status AS value, customs_status AS label FROM importadex_operations WHERE customs_status IS NOT NULL AND BTRIM(customs_status) <> ''
         UNION SELECT 'customs_status' AS "group", status AS value, status AS label FROM importadex_customs_files WHERE status IS NOT NULL AND BTRIM(status) <> ''
         UNION SELECT 'document_type' AS "group", name AS value, name AS label FROM importadex_documents WHERE name IS NOT NULL AND BTRIM(name) <> ''
+        UNION SELECT 'client_source' AS "group", discovery_source AS value, discovery_source AS label FROM importadex_clients WHERE discovery_source IS NOT NULL AND BTRIM(discovery_source) <> ''
       )
       SELECT DISTINCT ON ("group", LOWER(label)) "group", value, label
       FROM option_rows
@@ -1120,6 +1123,37 @@ export const importadexService = {
        ORDER BY total DESC, label
        LIMIT 12`,
     );
+    const clientsByDiscoverySource = await prisma.$queryRawUnsafe<unknown[]>(
+      `SELECT COALESCE(NULLIF(discovery_source, ''), 'Sin origen registrado') AS label,
+        COUNT(*)::int AS total
+       FROM importadex_clients
+       GROUP BY COALESCE(NULLIF(discovery_source, ''), 'Sin origen registrado')
+       ORDER BY total DESC, label
+       LIMIT 12`,
+    );
+    const operationsByDiscoverySource = await prisma.$queryRawUnsafe<unknown[]>(
+      `SELECT COALESCE(NULLIF(c.discovery_source, ''), 'Sin origen registrado') AS label,
+        COUNT(*)::int AS total
+       FROM importadex_operations o
+       LEFT JOIN LATERAL (
+         SELECT discovery_source
+         FROM importadex_clients c
+         WHERE c.id = o.client_id
+           OR (
+             o.client_id IS NULL
+             AND (
+               o.client_name = c.name
+               OR o.client_name = CONCAT(c.name, CASE WHEN c.last_name IS NULL OR BTRIM(c.last_name) = '' THEN '' ELSE CONCAT(' ', c.last_name) END)
+             )
+           )
+         ORDER BY CASE WHEN c.id = o.client_id THEN 0 ELSE 1 END, c.created_at DESC
+         LIMIT 1
+       ) c ON true
+       WHERE o.is_active = true
+       GROUP BY COALESCE(NULLIF(c.discovery_source, ''), 'Sin origen registrado')
+       ORDER BY total DESC, label
+       LIMIT 12`,
+    );
     const recentOperationsByCreator = await prisma.$queryRawUnsafe<unknown[]>(
       `SELECT id, code, client_name, status, created_by_name, created_by_email, created_at
        FROM importadex_operations
@@ -1185,6 +1219,8 @@ export const importadexService = {
       topClients,
       monthlyOperations,
       operationsByCreator,
+      clientsByDiscoverySource,
+      operationsByDiscoverySource,
       recentOperationsByCreator,
       riskOperations,
     };
